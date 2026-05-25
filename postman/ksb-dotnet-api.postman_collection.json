@@ -1,0 +1,659 @@
+{
+  "info": {
+    "name": "KSB .NET API",
+    "description": "Single collection for .NET auth, roles, users, and master-data APIs.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://127.0.0.1:5088/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin@example.com\",\n  \"password\": \"password\",\n  \"unique_id\": \"postman-device\",\n  \"device_type\": \"web\",\n  \"device_name\": \"Postman\",\n  \"app_version\": \"1.0.0\"\n}"
+            },
+            "url": "{{base_url}}/login"
+          }
+        },
+        {
+          "name": "Signup User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Test\",\n  \"last_name\": \"User\",\n  \"name\": \"Test User\",\n  \"mobile\": \"9999999999\",\n  \"email\": \"test.user@example.com\",\n  \"password\": \"password\",\n  \"roles\": [2],\n  \"cities\": [],\n  \"branch_id\": [1],\n  \"show_attandance_report\": \"1\"\n}"
+            },
+            "url": "{{base_url}}/signup"
+          }
+        },
+        {
+          "name": "Customer Signup",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Customer\",\n  \"shop_name\": \"Customer Shop\",\n  \"mobile\": \"9999999999\",\n  \"email\": \"customer@example.com\",\n  \"password\": \"password\",\n  \"device_type\": \"web\",\n  \"device_name\": \"Postman\",\n  \"app_version\": \"1.0.0\"\n}"
+            },
+            "url": "{{base_url}}/customerSignup"
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/logout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Roles",
+      "item": [
+        {
+          "name": "List Roles",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/roles?include_permissions=true"
+          }
+        },
+        {
+          "name": "Get Role",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/roles/1"
+          }
+        },
+        {
+          "name": "Create Role",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Role\",\n  \"guard_name\": \"users\",\n  \"permissions\": [1, 2]\n}"
+            },
+            "url": "{{base_url}}/roles"
+          }
+        },
+        {
+          "name": "Update Role",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test Role\",\n  \"guard_name\": \"users\",\n  \"permissions\": [1, 2, 3]\n}"
+            },
+            "url": "{{base_url}}/roles/1"
+          }
+        },
+        {
+          "name": "Delete Role",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/roles/1"
+          }
+        },
+        {
+          "name": "Sync Role Permissions",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": [1, 2, 3]\n}"
+            },
+            "url": "{{base_url}}/roles/1/permissions"
+          }
+        },
+        {
+          "name": "Save Role Permissions",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"permissions\": {\n    \"1\": [1, 2, 3]\n  }\n}"
+            },
+            "url": "{{base_url}}/roles/save-permissions"
+          }
+        },
+        {
+          "name": "List Permissions",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/permissions"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users",
+      "item": [
+        {
+          "name": "Export Users",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users-download?user_type=employee&active=Y"
+          }
+        },
+        {
+          "name": "User Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/users-template"
+          }
+        },
+        {
+          "name": "Upload Users",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "import_file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{base_url}}/users-upload"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Country",
+      "item": [
+        {
+          "name": "List Countries",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/getcountry"
+          }
+        },
+        {
+          "name": "Get Country",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/country/1"
+          }
+        },
+        {
+          "name": "Create Country",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_name\": \"India\"\n}"
+            },
+            "url": "{{base_url}}/country"
+          }
+        },
+        {
+          "name": "Update Country",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"country_name\": \"India\",\n  \"active\": \"Y\"\n}"
+            },
+            "url": "{{base_url}}/country/1"
+          }
+        },
+        {
+          "name": "Toggle Country Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": \"N\"\n}"
+            },
+            "url": "{{base_url}}/country/1/status"
+          }
+        },
+        {
+          "name": "Delete Country",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/country/1"
+          }
+        },
+        {
+          "name": "Upload Countries",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "import_file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{base_url}}/country-upload"
+          }
+        },
+        {
+          "name": "Export Countries",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/country-download"
+          }
+        },
+        {
+          "name": "Country Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/country-template"
+          }
+        }
+      ]
+    },
+    {
+      "name": "State",
+      "item": [
+        {
+          "name": "List States",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/getstate?country_id=1"
+          }
+        },
+        {
+          "name": "Get State",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/state/1"
+          }
+        },
+        {
+          "name": "Create State",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state_name\": \"Madhya Pradesh\",\n  \"country_id\": 1,\n  \"gst_code\": \"23\"\n}"
+            },
+            "url": "{{base_url}}/state"
+          }
+        },
+        {
+          "name": "Update State",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"state_name\": \"Madhya Pradesh\",\n  \"country_id\": 1,\n  \"gst_code\": \"23\",\n  \"active\": \"Y\"\n}"
+            },
+            "url": "{{base_url}}/state/1"
+          }
+        },
+        {
+          "name": "Toggle State Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": \"N\"\n}"
+            },
+            "url": "{{base_url}}/state/1/status"
+          }
+        },
+        {
+          "name": "Delete State",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/state/1"
+          }
+        },
+        {
+          "name": "Upload States",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "import_file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{base_url}}/state-upload"
+          }
+        },
+        {
+          "name": "Export States",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/state-download"
+          }
+        },
+        {
+          "name": "State Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/state-template"
+          }
+        }
+      ]
+    },
+    {
+      "name": "District",
+      "item": [
+        {
+          "name": "List Districts",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/getdistrict?state_id=1"
+          }
+        },
+        {
+          "name": "Create District",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district_name\": \"Indore\",\n  \"state_id\": 1\n}"
+            },
+            "url": "{{base_url}}/district"
+          }
+        },
+        {
+          "name": "Get District",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/district/1"
+          }
+        },
+        {
+          "name": "Update District",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"district_name\": \"Indore\",\n  \"state_id\": 1,\n  \"active\": \"Y\"\n}"
+            },
+            "url": "{{base_url}}/district/1"
+          }
+        },
+        {
+          "name": "Toggle District Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": \"N\"\n}"
+            },
+            "url": "{{base_url}}/district/1/status"
+          }
+        },
+        {
+          "name": "Delete District",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/district/1"
+          }
+        },
+        {
+          "name": "Upload Districts",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "import_file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{base_url}}/district-upload"
+          }
+        },
+        {
+          "name": "Export Districts",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/district-download"
+          }
+        },
+        {
+          "name": "District Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/district-template"
+          }
+        }
+      ]
+    },
+    {
+      "name": "City",
+      "item": [
+        {
+          "name": "List Cities",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/getcity?district_id=1"
+          }
+        },
+        {
+          "name": "Create City",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"city_name\": \"Indore\",\n  \"district_id\": 1,\n  \"grade\": \"A\"\n}"
+            },
+            "url": "{{base_url}}/city"
+          }
+        },
+        {
+          "name": "Get City",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/city/1"
+          }
+        },
+        {
+          "name": "Update City",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"city_name\": \"Indore\",\n  \"district_id\": 1,\n  \"grade\": \"A\",\n  \"active\": \"Y\"\n}"
+            },
+            "url": "{{base_url}}/city/1"
+          }
+        },
+        {
+          "name": "Toggle City Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": \"N\"\n}"
+            },
+            "url": "{{base_url}}/city/1/status"
+          }
+        },
+        {
+          "name": "Delete City",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/city/1"
+          }
+        },
+        {
+          "name": "Upload Cities",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "import_file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{base_url}}/city-upload"
+          }
+        },
+        {
+          "name": "Export Cities",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/city-download"
+          }
+        },
+        {
+          "name": "City Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/city-template"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Pincode",
+      "item": [
+        {
+          "name": "List Pincodes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/getpincode?city_id=1"
+          }
+        },
+        {
+          "name": "Create Pincode",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pincode\": \"452001\",\n  \"city_id\": 1\n}"
+            },
+            "url": "{{base_url}}/pincode"
+          }
+        },
+        {
+          "name": "Get Pincode",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/pincode/1"
+          }
+        },
+        {
+          "name": "Update Pincode",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"pincode\": \"452001\",\n  \"city_id\": 1,\n  \"active\": \"Y\"\n}"
+            },
+            "url": "{{base_url}}/pincode/1"
+          }
+        },
+        {
+          "name": "Toggle Pincode Status",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": \"N\"\n}"
+            },
+            "url": "{{base_url}}/pincode/1/status"
+          }
+        },
+        {
+          "name": "Delete Pincode",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base_url}}/pincode/1"
+          }
+        },
+        {
+          "name": "Upload Pincodes",
+          "request": {
+            "method": "POST",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "import_file",
+                  "type": "file",
+                  "src": ""
+                }
+              ]
+            },
+            "url": "{{base_url}}/pincode-upload"
+          }
+        },
+        {
+          "name": "Export Pincodes",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/pincode-download"
+          }
+        },
+        {
+          "name": "Pincode Template",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/pincode-template"
+          }
+        }
+      ]
+    }
+  ]
+}

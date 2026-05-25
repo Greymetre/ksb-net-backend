@@ -1,0 +1,43 @@
+# Build directories
+bin/
+obj/
+**/bin/
+**/obj/
+
+# VS and editor files
+.vs/
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.sln.ide
+*.userprefs
+
+# Rider
+.idea/
+*.sln.iml
+
+# Publish output
+publish/
+*.publish.xml
+
+# NuGet packages
+*.nupkg
+
+# Local database files
+*.db
+*.sqlite
+
+# Artifacts and temporary files
+artifacts/
+api-build/
+api-build-verify/
+api-verify/
+
+# Logs
+*.log
+
+# OS generated files
+Thumbs.db
+Desktop.ini

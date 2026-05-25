@@ -1,0 +1,274 @@
+using System.Text.Json;
+using Application.DTOs.Customers;
+using Application.Interfaces.Repositories;
+using Domain.Entities;
+using Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+
+namespace Infrastructure.Repositories;
+
+public sealed class CustomerRepository : ICustomerRepository
+{
+    private const int MaxRows = 1000;
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    private readonly AppDbContext _dbContext;
+
+    public CustomerRepository(AppDbContext dbContext)
+    {
+        _dbContext = dbContext;
+    }
+
+    public async Task<IReadOnlyCollection<CustomerDto>> GetCustomersAsync(CustomerListFilterDto filter, CancellationToken cancellationToken)
+    {
+        var query = _dbContext.Customers.AsNoTracking().Where(x => x.DeletedAt == null);
+
+        if (filter.CustomerType.HasValue) query = query.Where(x => x.CustomerType == filter.CustomerType);
+        if (!string.IsNullOrWhiteSpace(filter.Active)) query = query.Where(x => x.Active == NormalizeActive(filter.Active));
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim();
+            query = query.Where(x =>
+                x.Name.Contains(search)
+                || (x.Mobile != null && x.Mobile.Contains(search))
+                || (x.Email != null && x.Email.Contains(search))
+                || x.CustomerCode.Contains(search));
+        }
+
+        var rows = await query
+            .OrderByDescending(x => x.Id)
+            .Take(MaxRows)
+            .Select(x => new
+            {
+                Customer = x,
+                CreatedByName = _dbContext.Users.Where(user => user.Id == x.CreatedBy).Select(user => user.Name).FirstOrDefault(),
+                ParentName = _dbContext.Customers.Where(parent => parent.Id == x.ParentId).Select(parent => parent.Name).FirstOrDefault()
+            })
+            .ToListAsync(cancellationToken);
+
+        var customers = rows.Select(row => ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName)).ToList();
+        customers = ApplyJsonFilters(customers, filter).ToList();
+        await AttachAddressNamesAsync(customers, cancellationToken);
+        return customers;
+    }
+
+    public async Task<CustomerDto?> GetCustomerAsync(ulong id, CancellationToken cancellationToken)
+    {
+        var row = await _dbContext.Customers.AsNoTracking()
+            .Where(x => x.Id == id && x.DeletedAt == null)
+            .Select(x => new
+            {
+                Customer = x,
+                CreatedByName = _dbContext.Users.Where(user => user.Id == x.CreatedBy).Select(user => user.Name).FirstOrDefault(),
+                ParentName = _dbContext.Customers.Where(parent => parent.Id == x.ParentId).Select(parent => parent.Name).FirstOrDefault()
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (row is null) return null;
+        var dto = ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName);
+        await AttachAddressNamesAsync([dto], cancellationToken);
+        return dto;
+    }
+
+    public async Task<CustomerDto> CreateCustomerAsync(CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var customer = new Customer
+        {
+            Active = NormalizeActive(request.Active) ?? "Y",
+            Name = request.Name!.Trim(),
+            FirstName = NormalizeText(request.FirstName) ?? string.Empty,
+            LastName = NormalizeText(request.LastName) ?? string.Empty,
+            Mobile = NormalizeText(request.Mobile),
+            ContactNumber = NormalizeText(request.ContactNumber),
+            Email = NormalizeText(request.Email),
+            ProfileImage = NormalizeText(request.ProfileImage) ?? string.Empty,
+            ShopImage = NormalizeText(request.ShopImage),
+            CustomerCode = NormalizeText(request.CustomerCode) ?? NormalizeText(ReadField(request.CustomFields, "distributor_code")) ?? string.Empty,
+            CustomerType = request.CustomerType,
+            FirmType = request.FirmType,
+            ParentId = request.ParentId,
+            SapCode = NormalizeText(request.SapCode),
+            ManagerName = NormalizeText(request.ManagerName) ?? string.Empty,
+            ManagerPhone = NormalizeText(request.ManagerPhone) ?? string.Empty,
+            CustomFields = SerializeFields(request.CustomFields),
+            CreatedBy = actorUserId,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        await _dbContext.Customers.AddAsync(customer, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return ToCustomerDto(customer, null, null);
+    }
+
+    public async Task<CustomerDto?> UpdateCustomerAsync(ulong id, CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var customer = await _dbContext.Customers.FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, cancellationToken);
+        if (customer is null) return null;
+
+        if (!string.IsNullOrWhiteSpace(request.Name)) customer.Name = request.Name.Trim();
+        if (request.FirstName is not null) customer.FirstName = NormalizeText(request.FirstName) ?? string.Empty;
+        if (request.LastName is not null) customer.LastName = NormalizeText(request.LastName) ?? string.Empty;
+        if (request.Mobile is not null) customer.Mobile = NormalizeText(request.Mobile);
+        if (request.ContactNumber is not null) customer.ContactNumber = NormalizeText(request.ContactNumber);
+        if (request.Email is not null) customer.Email = NormalizeText(request.Email);
+        if (request.ProfileImage is not null) customer.ProfileImage = NormalizeText(request.ProfileImage) ?? string.Empty;
+        if (request.ShopImage is not null) customer.ShopImage = NormalizeText(request.ShopImage);
+        if (request.CustomerCode is not null) customer.CustomerCode = NormalizeText(request.CustomerCode) ?? string.Empty;
+        if (request.CustomerType.HasValue) customer.CustomerType = request.CustomerType;
+        if (request.FirmType.HasValue) customer.FirmType = request.FirmType;
+        if (request.ParentId.HasValue) customer.ParentId = request.ParentId;
+        if (request.SapCode is not null) customer.SapCode = NormalizeText(request.SapCode);
+        if (request.ManagerName is not null) customer.ManagerName = NormalizeText(request.ManagerName) ?? string.Empty;
+        if (request.ManagerPhone is not null) customer.ManagerPhone = NormalizeText(request.ManagerPhone) ?? string.Empty;
+        if (request.CustomFields is not null) customer.CustomFields = SerializeFields(request.CustomFields);
+
+        var active = NormalizeActive(request.Active);
+        if (active is not null) customer.Active = active;
+        customer.UpdatedBy = actorUserId;
+        customer.UpdatedAt = DateTime.UtcNow;
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return ToCustomerDto(customer, null, null);
+    }
+
+    public async Task<CustomerDto?> SetCustomerActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var customer = await _dbContext.Customers.FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, cancellationToken);
+        if (customer is null) return null;
+
+        customer.Active = NormalizeActive(active) ?? ToggleActive(customer.Active);
+        customer.UpdatedBy = actorUserId;
+        customer.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return ToCustomerDto(customer, null, null);
+    }
+
+    public async Task<bool> DeleteCustomerAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var customer = await _dbContext.Customers.FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, cancellationToken);
+        if (customer is null) return false;
+
+        customer.Active = "N";
+        customer.DeletedAt = DateTime.UtcNow;
+        customer.UpdatedBy = actorUserId;
+        customer.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    public async Task<bool> MobileExistsAsync(string mobile, ulong? exceptId, CancellationToken cancellationToken) =>
+        await _dbContext.Customers.AnyAsync(x => x.DeletedAt == null && x.Mobile == mobile && (!exceptId.HasValue || x.Id != exceptId), cancellationToken);
+
+    public async Task<bool> EmailExistsAsync(string email, ulong? exceptId, CancellationToken cancellationToken) =>
+        await _dbContext.Customers.AnyAsync(x => x.DeletedAt == null && x.Email == email && (!exceptId.HasValue || x.Id != exceptId), cancellationToken);
+
+    private static IEnumerable<CustomerDto> ApplyJsonFilters(IEnumerable<CustomerDto> customers, CustomerListFilterDto filter)
+    {
+        if (filter.StateId.HasValue) customers = customers.Where(x => x.StateId == filter.StateId);
+        if (filter.CityId.HasValue) customers = customers.Where(x => x.CityId == filter.CityId);
+        if (filter.PincodeId.HasValue) customers = customers.Where(x => x.PincodeId == filter.PincodeId);
+        return customers;
+    }
+
+    private async Task AttachAddressNamesAsync(IReadOnlyCollection<CustomerDto> customers, CancellationToken cancellationToken)
+    {
+        var countryIds = customers.Select(x => x.CountryId).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var stateIds = customers.Select(x => x.StateId).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var districtIds = customers.Select(x => x.DistrictId).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var cityIds = customers.Select(x => x.CityId).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+        var pincodeIds = customers.Select(x => x.PincodeId).Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToArray();
+
+        var countries = await _dbContext.Countries.AsNoTracking().Where(x => countryIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.CountryName, cancellationToken);
+        var states = await _dbContext.States.AsNoTracking().Where(x => stateIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.StateName, cancellationToken);
+        var districts = await _dbContext.Districts.AsNoTracking().Where(x => districtIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.DistrictName, cancellationToken);
+        var cities = await _dbContext.Cities.AsNoTracking().Where(x => cityIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.CityName, cancellationToken);
+        var pincodes = await _dbContext.Pincodes.AsNoTracking().Where(x => pincodeIds.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.PinCode, cancellationToken);
+
+        foreach (var customer in customers)
+        {
+            if (customer.CountryId.HasValue && countries.TryGetValue(customer.CountryId.Value, out var country)) customer.CountryName = country;
+            if (customer.StateId.HasValue && states.TryGetValue(customer.StateId.Value, out var state)) customer.StateName = state;
+            if (customer.DistrictId.HasValue && districts.TryGetValue(customer.DistrictId.Value, out var district)) customer.DistrictName = district;
+            if (customer.CityId.HasValue && cities.TryGetValue(customer.CityId.Value, out var city)) customer.CityName = city;
+            if (customer.PincodeId.HasValue && pincodes.TryGetValue(customer.PincodeId.Value, out var pincode)) customer.Pincode = pincode;
+        }
+    }
+
+    private static CustomerDto ToCustomerDto(Customer customer, string? createdByName, string? parentName)
+    {
+        var fields = DeserializeFields(customer.CustomFields);
+        return new CustomerDto
+        {
+            Id = customer.Id,
+            Active = customer.Active,
+            Name = customer.Name,
+            Mobile = customer.Mobile,
+            ContactNumber = customer.ContactNumber,
+            Email = customer.Email,
+            CustomerCode = customer.CustomerCode,
+            ProfileImage = customer.ProfileImage,
+            ShopImage = customer.ShopImage,
+            CustomerType = customer.CustomerType,
+            CustomerTypeName = CustomerTypeName(customer.CustomerType),
+            SapCode = customer.SapCode,
+            ParentId = customer.ParentId,
+            ParentName = parentName,
+            CountryId = ReadULong(fields, "country_id"),
+            StateId = ReadULong(fields, "state_id"),
+            DistrictId = ReadULong(fields, "district_id"),
+            CityId = ReadULong(fields, "city_id"),
+            PincodeId = ReadULong(fields, "pincode_id"),
+            CreatedBy = customer.CreatedBy,
+            CreatedByName = createdByName,
+            CreatedAt = customer.CreatedAt,
+            CustomFields = fields
+        };
+    }
+
+    private static Dictionary<string, string?> DeserializeFields(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string?>>(json, JsonOptions) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string? SerializeFields(Dictionary<string, string?>? fields) =>
+        fields is null ? null : JsonSerializer.Serialize(fields.Where(x => !string.IsNullOrWhiteSpace(x.Value)).ToDictionary(x => x.Key, x => x.Value), JsonOptions);
+
+    private static string CustomerTypeName(ulong? type) => type switch
+    {
+        1 => "Distributor",
+        2 => "Retailer",
+        null => string.Empty,
+        _ => $"Type {type}"
+    };
+
+    private static string? ReadField(IReadOnlyDictionary<string, string?>? fields, string key) =>
+        fields is not null && fields.TryGetValue(key, out var value) ? value : null;
+
+    private static ulong? ReadULong(IReadOnlyDictionary<string, string?> fields, string key) =>
+        ulong.TryParse(ReadField(fields, key), out var parsed) ? parsed : null;
+
+    private static string? NormalizeText(string? value)
+    {
+        if (value is null) return null;
+        var trimmed = value.Trim();
+        return trimmed.Length == 0 ? null : trimmed;
+    }
+
+    private static string? NormalizeActive(string? active)
+    {
+        if (string.IsNullOrWhiteSpace(active)) return null;
+        return active.Trim().Equals("N", StringComparison.OrdinalIgnoreCase) ? "N" : "Y";
+    }
+
+    private static string ToggleActive(string active) =>
+        active.Equals("Y", StringComparison.OrdinalIgnoreCase) ? "N" : "Y";
+}
