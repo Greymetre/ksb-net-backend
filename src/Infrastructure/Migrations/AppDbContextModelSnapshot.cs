@@ -57,7 +57,7 @@ namespace Infrastructure.Migrations
                         .HasColumnName("created_by");
 
                     b.Property<string>("CustomFields")
-                        .HasColumnType("json")
+                        .HasColumnType("longtext")
                         .HasColumnName("custom_fields");
 
                     b.Property<string>("CustomerCode")

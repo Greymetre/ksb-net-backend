@@ -4087,7 +4087,7 @@ namespace Infrastructure.Migrations
   ADD CONSTRAINT `beat_users_user_id_foreign` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`);");
             migrationBuilder.Sql(@"ALTER TABLE `new_invoices`
   ADD CONSTRAINT `new_invoices_created_by_foreign` FOREIGN KEY (`created_by`) REFERENCES `users` (`id`) ON DELETE CASCADE,
-  ADD CONSTRAINT `new_invoices_secondary_customer_id_foreign` FOREIGN KEY (`secondary_customer_id`) REFERENCES `secondary_customers` (`id`) ON DELETE CASCADE;");
+  ADD CONSTRAINT `new_invoices_secondary_customer_id_foreign` FOREIGN KEY (`secondary_customer_id`) REFERENCES `customers` (`id`) ON DELETE CASCADE;");
             migrationBuilder.Sql(@"SET FOREIGN_KEY_CHECKS=1;");
         }
 

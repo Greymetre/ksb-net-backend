@@ -58,7 +58,9 @@ public sealed class CustomerService : ICustomerService
     {
         NormalizeRequest(request);
         await ValidateAsync(request, null, cancellationToken);
-        return LaravelApiResponse.Success("customer", await _repository.CreateCustomerAsync(request, actorUserId, cancellationToken), "Customer created successfully");
+        var customer = await _repository.CreateCustomerAsync(request, actorUserId, cancellationToken);
+        await _repository.EnsureDistributorLoginUserAsync(customer.Id, actorUserId, cancellationToken);
+        return LaravelApiResponse.Success("customer", customer, "Customer created successfully");
     }
 
     public async Task<LaravelApiResponse> UpdateCustomerAsync(ulong id, CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
@@ -66,6 +68,7 @@ public sealed class CustomerService : ICustomerService
         NormalizeRequest(request);
         await ValidateAsync(request, id, cancellationToken);
         var customer = await _repository.UpdateCustomerAsync(id, request, actorUserId, cancellationToken);
+        if (customer is not null) await _repository.EnsureDistributorLoginUserAsync(customer.Id, actorUserId, cancellationToken);
         return LaravelApiResponse.Success("customer", customer ?? throw NotFound("Customer not found"), "Customer updated successfully");
     }
 

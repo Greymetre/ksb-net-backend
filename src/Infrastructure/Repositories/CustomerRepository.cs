@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Application.DTOs.Customers;
 using Application.Interfaces.Repositories;
+using Domain.Constants;
 using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,16 @@ namespace Infrastructure.Repositories;
 public sealed class CustomerRepository : ICustomerRepository
 {
     private const int MaxRows = 1000;
+    private const ulong DistributorCustomerType = 1;
+    private const string DistributorRoleName = "Distributor";
+    private const string GuardName = "users";
+    private static readonly string[] DistributorPermissions =
+    [
+        "dashboard_access",
+        "scheme_access",
+        "new_invoice_access",
+        "new_invoice_create"
+    ];
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _dbContext;
 
@@ -140,6 +151,7 @@ public sealed class CustomerRepository : ICustomerRepository
         customer.Active = NormalizeActive(active) ?? ToggleActive(customer.Active);
         customer.UpdatedBy = actorUserId;
         customer.UpdatedAt = DateTime.UtcNow;
+        await SyncLinkedUserActiveAsync(customer.Id, customer.Active, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return ToCustomerDto(customer, null, null);
     }
@@ -153,8 +165,100 @@ public sealed class CustomerRepository : ICustomerRepository
         customer.DeletedAt = DateTime.UtcNow;
         customer.UpdatedBy = actorUserId;
         customer.UpdatedAt = DateTime.UtcNow;
+        await SyncLinkedUserActiveAsync(customer.Id, "N", cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    public async Task EnsureDistributorLoginUserAsync(ulong customerId, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var customer = await _dbContext.Customers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == customerId && x.DeletedAt == null, cancellationToken);
+
+        if (customer?.CustomerType != DistributorCustomerType) return;
+
+        var mobile = NormalizeMobile(customer.Mobile ?? FirstMobile(ReadCustomerField(customer, "mobile_numbers")));
+        if (string.IsNullOrWhiteSpace(mobile) || mobile.Length > 11) return;
+
+        var email = NormalizeText(customer.Email) ?? $"customer{customer.Id}@gmail.com";
+        var name = FirstNonBlank(
+            ReadCustomerField(customer, "contact_person"),
+            ReadCustomerField(customer, "trade_name"),
+            ReadCustomerField(customer, "legal_name"),
+            customer.Name) ?? $"Distributor {customer.Id}";
+        var (firstName, lastName) = SplitName(name);
+        var role = await EnsureDistributorRoleAsync(cancellationToken);
+
+        var linkedUser = await _dbContext.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.CustomerId == customer.Id, cancellationToken);
+        var emailUser = await _dbContext.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Email == email, cancellationToken);
+        var user = linkedUser ?? emailUser;
+
+        if (user is not null && user.CustomerId.HasValue && user.CustomerId.Value != customer.Id) return;
+
+        var mobileOwner = await _dbContext.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Mobile == mobile && (user == null || x.Id != user.Id), cancellationToken);
+        if (mobileOwner is not null) return;
+
+        var passwordHash = BCrypt.Net.BCrypt.HashPassword(mobile);
+        var now = DateTime.UtcNow;
+
+        if (user is null)
+        {
+            user = new User
+            {
+                Active = NormalizeActive(customer.Active) ?? "Y",
+                Name = name,
+                FirstName = firstName,
+                LastName = lastName,
+                Mobile = mobile,
+                Email = email,
+                Password = passwordHash,
+                PasswordString = mobile,
+                ReportingId = actorUserId,
+                CustomerId = customer.Id,
+                CreatedBy = actorUserId,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            await _dbContext.Users.AddAsync(user, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            user.Active = NormalizeActive(customer.Active) ?? user.Active;
+            user.Name = name;
+            user.FirstName = firstName;
+            user.LastName = lastName;
+            user.Mobile = mobile;
+            user.Email = email;
+            user.Password = passwordHash;
+            user.PasswordString = mobile;
+            user.CustomerId = customer.Id;
+            user.UpdatedAt = now;
+            if (!user.ReportingId.HasValue) user.ReportingId = actorUserId;
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var hasRole = await _dbContext.ModelHasRoles.AnyAsync(
+            x => x.ModelId == user.Id && x.ModelType == LaravelModelTypes.User && x.RoleId == role.Id,
+            cancellationToken);
+
+        if (!hasRole)
+        {
+            await _dbContext.ModelHasRoles.AddAsync(new ModelHasRole
+            {
+                RoleId = role.Id,
+                ModelId = user.Id,
+                ModelType = LaravelModelTypes.User
+            }, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
     }
 
     public async Task<bool> MobileExistsAsync(string mobile, ulong? exceptId, CancellationToken cancellationToken) =>
@@ -253,6 +357,9 @@ public sealed class CustomerRepository : ICustomerRepository
     private static string? ReadField(IReadOnlyDictionary<string, string?>? fields, string key) =>
         fields is not null && fields.TryGetValue(key, out var value) ? value : null;
 
+    private static string? ReadCustomerField(Customer customer, string key) =>
+        ReadField(DeserializeFields(customer.CustomFields), key);
+
     private static ulong? ReadULong(IReadOnlyDictionary<string, string?> fields, string key) =>
         ulong.TryParse(ReadField(fields, key), out var parsed) ? parsed : null;
 
@@ -271,4 +378,85 @@ public sealed class CustomerRepository : ICustomerRepository
 
     private static string ToggleActive(string active) =>
         active.Equals("Y", StringComparison.OrdinalIgnoreCase) ? "N" : "Y";
+
+    private async Task<Role> EnsureDistributorRoleAsync(CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        var role = await _dbContext.Roles.FirstOrDefaultAsync(
+            x => x.Name == DistributorRoleName && x.GuardName == GuardName,
+            cancellationToken);
+
+        if (role is null)
+        {
+            role = new Role
+            {
+                Name = DistributorRoleName,
+                GuardName = GuardName,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            await _dbContext.Roles.AddAsync(role, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        var permissionIds = await _dbContext.Permissions
+            .Where(x => x.GuardName == GuardName && DistributorPermissions.Contains(x.Name))
+            .Select(x => x.Id)
+            .ToArrayAsync(cancellationToken);
+
+        var assignedPermissionIds = await _dbContext.RoleHasPermissions
+            .Where(x => x.RoleId == role.Id)
+            .Select(x => x.PermissionId)
+            .ToArrayAsync(cancellationToken);
+
+        var missingPermissions = permissionIds
+            .Except(assignedPermissionIds)
+            .Select(permissionId => new RoleHasPermission
+            {
+                RoleId = role.Id,
+                PermissionId = permissionId
+            })
+            .ToArray();
+
+        if (missingPermissions.Length > 0)
+        {
+            await _dbContext.RoleHasPermissions.AddRangeAsync(missingPermissions, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        return role;
+    }
+
+    private async Task SyncLinkedUserActiveAsync(ulong customerId, string active, CancellationToken cancellationToken)
+    {
+        var users = await _dbContext.Users.IgnoreQueryFilters()
+            .Where(x => x.CustomerId == customerId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var user in users)
+        {
+            user.Active = active;
+            user.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
+    private static string? FirstNonBlank(params string?[] values) =>
+        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
+
+    private static string? FirstMobile(string? mobileNumbers) =>
+        mobileNumbers?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+
+    private static string? NormalizeMobile(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        if (digits.Length > 10 && digits.StartsWith("91", StringComparison.Ordinal)) digits = digits[2..];
+        return string.IsNullOrWhiteSpace(digits) ? null : digits;
+    }
+
+    private static (string FirstName, string LastName) SplitName(string name)
+    {
+        var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return (parts.FirstOrDefault() ?? name, parts.Length > 1 ? parts[1] : string.Empty);
+    }
 }

@@ -38,7 +38,7 @@ public sealed class CustomerConfiguration : IEntityTypeConfiguration<Customer>
         builder.Property(x => x.ManagerName).HasColumnName("manager_name").HasMaxLength(250).HasDefaultValue("");
         builder.Property(x => x.ManagerPhone).HasColumnName("manager_phone").HasMaxLength(50).HasDefaultValue("");
         builder.Property(x => x.Otp).HasColumnName("otp").HasMaxLength(20);
-        builder.Property(x => x.CustomFields).HasColumnName("custom_fields").HasColumnType("json");
+        builder.Property(x => x.CustomFields).HasColumnName("custom_fields").HasColumnType("longtext");
         builder.Property(x => x.SameAddress).HasColumnName("same_address");
         builder.Property(x => x.ParentId).HasColumnName("parent_id");
         builder.Property(x => x.SapCode).HasColumnName("sap_code").HasMaxLength(255);

@@ -18,6 +18,7 @@ public static class MasterDataSeeder
             await CitiesSeeder.SeedAsync(db, cancellationToken);
             await PincodesSeeder.SeedAsync(db, cancellationToken);
             await PermissionsSeeder.SeedAsync(db, cancellationToken);
+            await RolesSeeder.SeedAsync(db, cancellationToken);
         }
         finally
         {
