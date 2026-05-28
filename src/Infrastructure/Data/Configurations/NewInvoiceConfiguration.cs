@@ -16,6 +16,7 @@ public sealed class NewInvoiceConfiguration : IEntityTypeConfiguration<NewInvoic
         builder.Property(x => x.InvoiceDate).HasColumnName("invoice_date").HasColumnType("date");
         builder.Property(x => x.Amount).HasColumnName("amount").HasPrecision(15, 2);
         builder.Property(x => x.Points).HasColumnName("points").HasPrecision(15, 2).HasDefaultValue(0);
+        builder.Property(x => x.Attachment).HasColumnName("attachment").HasMaxLength(500);
         builder.Property(x => x.ApprovalStatus).HasColumnName("approval_status").HasDefaultValue(0);
         builder.Property(x => x.ApprovalRemark).HasColumnName("approval_remark").HasColumnType("text");
         builder.Property(x => x.ApprovedSsBy).HasColumnName("approved_ss_by");

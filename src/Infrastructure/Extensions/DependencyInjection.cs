@@ -23,7 +23,9 @@ public static class DependencyInjection
         services.AddScoped<IAuthRepository, AuthRepository>();
         services.AddScoped<IMasterDataRepository, MasterDataRepository>();
         services.AddScoped<ICustomerRepository, CustomerRepository>();
+        services.AddScoped<ILoyaltySchemeRepository, LoyaltySchemeRepository>();
         services.AddScoped<INewInvoiceRepository, NewInvoiceRepository>();
+        services.AddScoped<IProductRepository, ProductRepository>();
         services.AddScoped<IRoleRepository, RoleRepository>();
         services.AddScoped<IUserRepository, UserRepository>();
         services.AddScoped<IPasswordHasher, BCryptPasswordHasher>();

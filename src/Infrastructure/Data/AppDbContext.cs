@@ -32,6 +32,12 @@ public sealed class AppDbContext : DbContext
     public DbSet<Division> Divisions => Set<Division>();
     public DbSet<Designation> Designations => Set<Designation>();
     public DbSet<Department> Departments => Set<Department>();
+    public DbSet<ProductCategory> ProductCategories => Set<ProductCategory>();
+    public DbSet<ProductFamily> ProductFamilies => Set<ProductFamily>();
+    public DbSet<Product> Products => Set<Product>();
+    public DbSet<ProductDetail> ProductDetails => Set<ProductDetail>();
+    public DbSet<LoyaltyScheme> LoyaltySchemes => Set<LoyaltyScheme>();
+    public DbSet<LoyaltySchemeSlab> LoyaltySchemeSlabs => Set<LoyaltySchemeSlab>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

@@ -14,6 +14,17 @@ public sealed class NewInvoiceDto
     public DateTime InvoiceDate { get; set; }
     public decimal Amount { get; set; }
     public decimal Points { get; set; }
+    public ulong? SchemeId { get; set; }
+    public string? SchemeName { get; set; }
+    public string? SchemeCode { get; set; }
+    public string? SchemeTag { get; set; }
+    public string? SchemeBasedOn { get; set; }
+    public decimal? SchemeRewardValue { get; set; }
+    public decimal SchemePoints { get; set; }
+    public string? SchemeHintMessage { get; set; }
+    public decimal RegularWalletPoints { get; set; }
+    public decimal BoosterWalletPoints { get; set; }
+    public string? Attachment { get; set; }
     public int ApprovalStatus { get; set; }
     public string ApprovalStatusLabel { get; set; } = string.Empty;
     public string? ApprovalRemark { get; set; }
@@ -45,6 +56,7 @@ public sealed class NewInvoiceRequestDto
     public DateTime? InvoiceDate { get; set; }
     public decimal? Amount { get; set; }
     public decimal? Points { get; set; }
+    public string? Attachment { get; set; }
 }
 
 public sealed class NewInvoiceFilterDto

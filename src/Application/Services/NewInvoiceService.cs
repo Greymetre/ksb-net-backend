@@ -1,7 +1,9 @@
 using Application.Common;
+using Application.DTOs.MasterData;
 using Application.DTOs.NewInvoices;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using ClosedXML.Excel;
 using Domain.Entities;
 using Shared.Exceptions;
 using Shared.Responses;
@@ -28,6 +30,30 @@ public sealed class NewInvoiceService : INewInvoiceService
         });
     }
 
+    public async Task<MasterDataFileDto> ExportInvoicesAsync(NewInvoiceFilterDto filter, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var invoices = await _repository.GetInvoicesAsync(filter, actorUserId, cancellationToken);
+        return CreateWorkbook("new-invoices.xlsx",
+            ["retailer_id", "customer", "shop", "mobile", "city", "zone", "invoice_date", "invoice_number", "amount", "scheme_name", "points", "scheme_hint", "attachment", "status"],
+            invoices.Select(x => new object?[]
+            {
+                x.RetailerCode,
+                x.CustomerName,
+                x.ShopName,
+                x.MobileNumber,
+                x.CityName,
+                x.ZoneName,
+                x.InvoiceDate,
+                x.InvoiceNumber,
+                x.Amount,
+                x.SchemeName,
+                x.SchemePoints,
+                x.SchemeHintMessage,
+                x.Attachment,
+                x.ApprovalStatusLabel
+            }));
+    }
+
     public async Task<LaravelApiResponse> GetInvoiceAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("new_invoice", await GetOrThrowAsync(id, actorUserId, cancellationToken));
 
@@ -47,6 +73,7 @@ public sealed class NewInvoiceService : INewInvoiceService
             InvoiceDate = request.InvoiceDate!.Value.Date,
             Amount = request.Amount!.Value,
             Points = request.Points ?? 0,
+            Attachment = NormalizeText(request.Attachment),
             ApprovalStatus = NewInvoice.StatusPending,
             CreatedBy = actorUserId.Value,
             CreatedAt = now,
@@ -80,6 +107,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         invoice.InvoiceDate = request.InvoiceDate!.Value.Date;
         invoice.Amount = request.Amount!.Value;
         invoice.Points = request.Points ?? 0;
+        if (request.Attachment is not null) invoice.Attachment = NormalizeText(request.Attachment);
 
         var updated = await _repository.SaveInvoiceAsync(invoice, "updated", invoice.ApprovalStatus, invoice.ApprovalStatus, actorUserId.Value, null, cancellationToken);
         return LaravelApiResponse.Success("new_invoice", updated, "Invoice updated successfully");
@@ -180,19 +208,26 @@ public sealed class NewInvoiceService : INewInvoiceService
     private async Task<NewInvoice> FindOrThrowAsync(ulong id, CancellationToken cancellationToken) =>
         await _repository.FindInvoiceEntityAsync(id, cancellationToken) ?? throw Http(LaravelStatusCodes.NotFound, "Invoice not found");
 
-    private static NewInvoiceSummaryDto BuildSummary(IReadOnlyCollection<NewInvoiceDto> invoices) =>
-        new()
+    private static NewInvoiceSummaryDto BuildSummary(IReadOnlyCollection<NewInvoiceDto> invoices)
+    {
+        var distinctInvoices = invoices
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToList();
+
+        return new NewInvoiceSummaryDto
         {
-            TotalInvoices = invoices.Count,
-            TotalRetailers = invoices.Select(x => x.SecondaryCustomerId).Distinct().Count(),
-            ApprovedSs = invoices.Count(x => x.ApprovalStatus == NewInvoice.StatusApprovedSs),
-            ApprovedSales = invoices.Count(x => x.ApprovalStatus == NewInvoice.StatusApprovedSales),
-            ApprovedHo = invoices.Count(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo),
-            Pending = invoices.Count(x => x.ApprovalStatus == NewInvoice.StatusPending),
-            Rejected = invoices.Count(x => x.ApprovalStatus == NewInvoice.StatusRejected),
-            TotalPoints = invoices.Sum(x => x.Points),
-            TotalAmount = invoices.Sum(x => x.Amount)
+            TotalInvoices = distinctInvoices.Count,
+            TotalRetailers = distinctInvoices.Select(x => x.SecondaryCustomerId).Distinct().Count(),
+            ApprovedSs = distinctInvoices.Count(x => x.ApprovalStatus == NewInvoice.StatusApprovedSs),
+            ApprovedSales = distinctInvoices.Count(x => x.ApprovalStatus == NewInvoice.StatusApprovedSales),
+            ApprovedHo = distinctInvoices.Count(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo),
+            Pending = distinctInvoices.Count(x => x.ApprovalStatus == NewInvoice.StatusPending),
+            Rejected = distinctInvoices.Count(x => x.ApprovalStatus == NewInvoice.StatusRejected),
+            TotalPoints = invoices.Sum(x => x.SchemePoints),
+            TotalAmount = distinctInvoices.Sum(x => x.Amount)
         };
+    }
 
     private static Dictionary<int, string> ApprovalStatuses() => new()
     {
@@ -220,6 +255,33 @@ public sealed class NewInvoiceService : INewInvoiceService
     {
         if (string.IsNullOrWhiteSpace(value)) return null;
         return value.Trim();
+    }
+
+    private static MasterDataFileDto CreateWorkbook(string fileName, string[] headings, IEnumerable<object?[]> rows)
+    {
+        using var workbook = new XLWorkbook();
+        var worksheet = workbook.AddWorksheet("Sheet1");
+        for (var column = 0; column < headings.Length; column++)
+        {
+            worksheet.Cell(1, column + 1).Value = headings[column].Replace("_", " ").ToUpperInvariant();
+            worksheet.Cell(1, column + 1).Style.Font.Bold = true;
+        }
+
+        var rowNumber = 2;
+        foreach (var row in rows)
+        {
+            for (var column = 0; column < row.Length; column++)
+            {
+                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(row[column]);
+            }
+
+            rowNumber++;
+        }
+
+        worksheet.Columns().AdjustToContents();
+        using var stream = new MemoryStream();
+        workbook.SaveAs(stream);
+        return new MasterDataFileDto { FileName = fileName, Content = stream.ToArray() };
     }
 
     private static LaravelHttpException Http(int statusCode, object message) => new(statusCode, message);

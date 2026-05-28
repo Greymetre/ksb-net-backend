@@ -99,10 +99,25 @@ Apply migrations:
 dotnet ef database update --project src\Infrastructure\Infrastructure.csproj --startup-project src\Api\Api.csproj
 ```
 
+## Run All Migrations and Seeders
+
+From the backend folder, run the commands in this order:
+
+```powershell
+cd c:\xampp\htdocs\ksb-pr\netProject\backend
+dotnet restore
+dotnet build
+dotnet ef database update --project src\Infrastructure\Infrastructure.csproj --startup-project src\Api\Api.csproj
+dotnet run --project src\Api\Api.csproj -- --seed-master-data
+dotnet run --project src\Api\Api.csproj -- --seed-superadmin
+```
+
+`dotnet ef database update` applies all pending EF Core migrations to the configured database. The seeder commands use the same connection string as the API from `src/Api/appsettings.json`, `src/Api/appsettings.Development.json`, or the `KSB_PR_CONNECTION` environment variable.
+
 For design-time migration generation without editing appsettings:
 
 ```powershell
-$env:KSB_PR_CONNECTION="Server=127.0.0.1;Port=3306;Database=netksb;User=root;Password=;"
+$env:KSB_PR_CONNECTION="Server=127.0.0.1;Port=3306;Database=netksb_new;User=root;Password=;"
 ```
 
 ## Migration Order

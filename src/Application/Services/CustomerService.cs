@@ -25,7 +25,7 @@ public sealed class CustomerService : ICustomerService
         "id", "customer_type", "name", "mobile", "contact_number", "active",
         "owner_name", "shop_name", "mobile_numbers", "distributor_name", "agri_distributor", "employee_id", "beat_id", "whatsapp_number",
         "address_line", "country_id", "state_id", "district_id", "city_id", "pincode_id",
-        "belt_area_market_name", "gst_number", "gst_attachment", "pan_number", "pan_attachment",
+        "belt_area_market_name", "gst_number", "gst_attachment", "pan_number", "pan_attachment", "aadhar_attachment",
         "bank_account_type", "bank_name", "bank_account_number", "ifsc_code", "account_holder_name",
         "bank_proof", "shop_photo", "gps_location"
     ];
@@ -38,7 +38,7 @@ public sealed class CustomerService : ICustomerService
         "distributor_code", "business_start_date", "country_id", "state_id", "district_id", "city_id", "pincode_id",
         "beat_id", "sales_executive_id", "supervisor_id", "distributor_name", "agri_distributor", "employee_id",
         "shop_image", "profile_image", "documents", "mou_file", "gst_number", "gst_attachment", "pan_number",
-        "pan_attachment", "bank_account_number", "ifsc_code", "bank_proof", "shop_photo", "gps_location"
+        "pan_attachment", "aadhar_attachment", "bank_account_number", "ifsc_code", "bank_proof", "shop_photo", "gps_location"
     };
 
     private readonly ICustomerRepository _repository;
@@ -108,7 +108,7 @@ public sealed class CustomerService : ICustomerService
         {
             var request = new CustomerRequestDto
             {
-                CustomerType = row.ULong("customer_type"),
+                CustomerType = row.CustomerType("customer_type"),
                 Name = row.Value("name"),
                 Mobile = row.Value("mobile"),
                 Email = row.Value("email"),
@@ -342,6 +342,20 @@ public sealed class CustomerService : ICustomerService
             var value = Value(heading);
             if (string.IsNullOrWhiteSpace(value)) return null;
             return ulong.TryParse(value, out var parsed) ? parsed : throw new FormatException($"{heading} must be numeric.");
+        }
+
+        public ulong? CustomerType(string heading)
+        {
+            var value = Value(heading);
+            if (string.IsNullOrWhiteSpace(value)) return null;
+            if (ulong.TryParse(value, out var parsed)) return parsed;
+
+            return value.Trim().ToLowerInvariant() switch
+            {
+                "distributor" => 1,
+                "retailer" => 2,
+                _ => throw new FormatException($"{heading} must be Distributor, Retailer, 1, or 2.")
+            };
         }
     }
 

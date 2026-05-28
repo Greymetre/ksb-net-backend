@@ -190,15 +190,22 @@ public sealed class CustomerRepository : ICustomerRepository
         var (firstName, lastName) = SplitName(name);
         var role = await EnsureDistributorRoleAsync(cancellationToken);
 
-        var linkedUser = await _dbContext.Users
+        var user = await _dbContext.Users
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.CustomerId == customer.Id, cancellationToken);
-        var emailUser = await _dbContext.Users
-            .IgnoreQueryFilters()
-            .FirstOrDefaultAsync(x => x.Email == email, cancellationToken);
-        var user = linkedUser ?? emailUser;
 
-        if (user is not null && user.CustomerId.HasValue && user.CustomerId.Value != customer.Id) return;
+        if (user is null)
+        {
+            var emailUser = await _dbContext.Users
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(x => x.Email == email, cancellationToken);
+
+            if (emailUser is not null)
+            {
+                if (emailUser.CustomerId != customer.Id) return;
+                user = emailUser;
+            }
+        }
 
         var mobileOwner = await _dbContext.Users
             .IgnoreQueryFilters()

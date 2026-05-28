@@ -9,7 +9,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class UserRepository : IUserRepository
 {
-    private static readonly ulong[] CustomerRoleIds = [29];
+    private const string DistributorRoleName = "Distributor";
     private const int MaxRows = 1000;
     private readonly AppDbContext _dbContext;
 
@@ -55,7 +55,7 @@ public sealed class UserRepository : IUserRepository
     public async Task<UserOptionsDto> GetUserOptionsAsync(CancellationToken cancellationToken)
     {
         var roles = await _dbContext.Roles.AsNoTracking()
-            .Where(x => x.Name != "super-admin")
+            .Where(x => x.Name != "super-admin" && x.Name != DistributorRoleName)
             .OrderBy(x => x.Name)
             .Select(x => new OptionDto { Id = x.Id, Name = x.Name })
             .ToListAsync(cancellationToken);
@@ -84,7 +84,7 @@ public sealed class UserRepository : IUserRepository
             .Select(x => new OptionDto { Id = x.Id, Name = x.Name })
             .ToListAsync(cancellationToken);
 
-        var reportings = await _dbContext.Users.AsNoTracking()
+        var reportings = await InternalUsersQuery(_dbContext.Users.AsNoTracking())
             .Where(x => x.Active == "Y")
             .OrderBy(x => x.Name)
             .Take(MaxRows)
@@ -262,11 +262,21 @@ public sealed class UserRepository : IUserRepository
             query = query.Where(x => x.DepartmentId == filters.DepartmentId);
         }
 
-        var customerRoleIds = CustomerRoleIds;
         return string.Equals(filters.UserType, "customer", StringComparison.OrdinalIgnoreCase)
-            ? query.Where(user => _dbContext.ModelHasRoles.Any(role => role.ModelId == user.Id && role.ModelType == LaravelModelTypes.User && customerRoleIds.Contains(role.RoleId)))
-            : query.Where(user => !_dbContext.ModelHasRoles.Any(role => role.ModelId == user.Id && role.ModelType == LaravelModelTypes.User && customerRoleIds.Contains(role.RoleId)));
+            ? query.Where(user => _dbContext.ModelHasRoles
+                .Join(_dbContext.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
+                .Any(x => x.modelRole.ModelId == user.Id && x.modelRole.ModelType == LaravelModelTypes.User && x.role.Name == DistributorRoleName))
+            : query.Where(user => !_dbContext.ModelHasRoles
+                .Join(_dbContext.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
+                .Any(x => x.modelRole.ModelId == user.Id && x.modelRole.ModelType == LaravelModelTypes.User && x.role.Name == DistributorRoleName));
     }
+
+    private IQueryable<User> InternalUsersQuery(IQueryable<User> query) =>
+        query.Where(user =>
+            !user.CustomerId.HasValue
+            && !_dbContext.ModelHasRoles
+                .Join(_dbContext.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
+                .Any(x => x.modelRole.ModelId == user.Id && x.modelRole.ModelType == LaravelModelTypes.User && x.role.Name == DistributorRoleName));
 
     private async Task<IReadOnlyCollection<UserDto>> ProjectUsersAsync(IQueryable<User> query, CancellationToken cancellationToken)
     {

@@ -30,7 +30,10 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             .ToListAsync(cancellationToken);
 
         var cities = await LoadCitiesAsync(rows.Select(x => CityId(x.Customer)), cancellationToken);
-        return rows.Select(x => ToDto(x.Invoice, x.Customer, CityName(x.Customer, cities), x.Creator, x.Branch)).ToList();
+        var assignedZones = await LoadAssignedZoneNamesAsync(rows.Select(x => x.Customer), cancellationToken);
+        var schemes = await LoadSchemesAsync(rows.Select(x => x.Invoice.InvoiceDate), cancellationToken);
+        var schemeInvoices = await LoadSchemeInvoicesAsync(rows.Select(x => x.Customer.Id), schemes, cancellationToken);
+        return rows.SelectMany(x => ToSchemeDtos(x.Invoice, x.Customer, CityName(x.Customer, cities), AssignedZoneName(x.Customer, assignedZones) ?? x.Branch?.BranchName, x.Creator, x.Branch, schemes, schemeInvoices)).ToList();
     }
 
     public async Task<NewInvoiceDto?> GetInvoiceAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
@@ -40,7 +43,10 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         if (row is null) return null;
 
         var cities = await LoadCitiesAsync([CityId(row.Customer)], cancellationToken);
-        var dto = ToDto(row.Invoice, row.Customer, CityName(row.Customer, cities), row.Creator, row.Branch);
+        var assignedZones = await LoadAssignedZoneNamesAsync([row.Customer], cancellationToken);
+        var schemes = await LoadSchemesAsync([row.Invoice.InvoiceDate], cancellationToken);
+        var schemeInvoices = await LoadSchemeInvoicesAsync([row.Customer.Id], schemes, cancellationToken);
+        var dto = ToSchemeDtos(row.Invoice, row.Customer, CityName(row.Customer, cities), AssignedZoneName(row.Customer, assignedZones) ?? row.Branch?.BranchName, row.Creator, row.Branch, schemes, schemeInvoices).First();
         dto.ApprovalLogs = await GetApprovalLogsAsync(id, cancellationToken);
         return dto;
     }
@@ -259,6 +265,29 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         return await _dbContext.Cities.AsNoTracking().Where(x => ids.Contains(x.Id)).ToDictionaryAsync(x => x.Id, x => x.CityName, cancellationToken);
     }
 
+    private async Task<Dictionary<ulong, string>> LoadAssignedZoneNamesAsync(IEnumerable<Customer> customers, CancellationToken cancellationToken)
+    {
+        var customerEmployeeIds = customers
+            .Select(customer => new { CustomerId = customer.Id, EmployeeId = AssignedEmployeeId(customer) })
+            .Where(x => x.EmployeeId.HasValue)
+            .ToList();
+
+        var employeeIds = customerEmployeeIds.Select(x => x.EmployeeId!.Value).Distinct().ToArray();
+        if (employeeIds.Length == 0) return [];
+
+        var employeeZones = await (from user in _dbContext.Users.AsNoTracking()
+                                   where employeeIds.Contains(user.Id)
+                                   join divisionRow in _dbContext.Divisions.AsNoTracking() on user.DivisionId equals divisionRow.Id into divisions
+                                   from division in divisions.DefaultIfEmpty()
+                                   select new { user.Id, ZoneName = division != null ? division.DivisionName : null })
+            .Where(x => x.ZoneName != null)
+            .ToDictionaryAsync(x => x.Id, x => x.ZoneName!, cancellationToken);
+
+        return customerEmployeeIds
+            .Where(x => x.EmployeeId.HasValue && employeeZones.ContainsKey(x.EmployeeId.Value))
+            .ToDictionary(x => x.CustomerId, x => employeeZones[x.EmployeeId!.Value]);
+    }
+
     private async Task<IReadOnlyCollection<NewInvoiceApprovalLogDto>> GetApprovalLogsAsync(ulong invoiceId, CancellationToken cancellationToken) =>
         await (from log in _dbContext.NewInvoiceApprovalLogs.AsNoTracking()
               where log.NewInvoiceId == invoiceId
@@ -279,8 +308,62 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
                   CreatedAt = log.CreatedAt
               }).ToListAsync(cancellationToken);
 
-    private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, User? creator, Branch? branch) =>
-        new()
+    private async Task<IReadOnlyCollection<LoyaltyScheme>> LoadSchemesAsync(IEnumerable<DateTime> invoiceDates, CancellationToken cancellationToken)
+    {
+        var dates = invoiceDates.Select(x => DateOnly.FromDateTime(x.Date)).ToArray();
+        if (dates.Length == 0) return [];
+        var minDate = dates.Min();
+        var maxDate = dates.Max();
+
+        return await _dbContext.LoyaltySchemes.AsNoTracking()
+            .Include(x => x.Slabs)
+            .Where(x => x.DeletedAt == null
+                && x.Active == "Y"
+                && x.Status == "Live"
+                && x.SchemeType == "Invoice"
+                && x.StartDate <= maxDate
+                && x.EndDate >= minDate)
+            .ToListAsync(cancellationToken);
+    }
+
+    private async Task<IReadOnlyCollection<SchemeInvoiceAmount>> LoadSchemeInvoicesAsync(IEnumerable<ulong> customerIds, IReadOnlyCollection<LoyaltyScheme> schemes, CancellationToken cancellationToken)
+    {
+        var ids = customerIds.Distinct().ToArray();
+        if (ids.Length == 0 || schemes.Count == 0) return [];
+
+        var minDate = schemes.Min(x => x.StartDate).ToDateTime(TimeOnly.MinValue);
+        var maxDate = schemes.Max(x => x.EndDate).ToDateTime(TimeOnly.MaxValue);
+
+        return await _dbContext.NewInvoices.AsNoTracking()
+            .Where(x => ids.Contains(x.SecondaryCustomerId)
+                && x.InvoiceDate >= minDate
+                && x.InvoiceDate <= maxDate)
+            .Select(x => new SchemeInvoiceAmount(x.Id, x.SecondaryCustomerId, x.InvoiceDate, x.Amount))
+            .ToListAsync(cancellationToken);
+    }
+
+    private static IReadOnlyCollection<NewInvoiceDto> ToSchemeDtos(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, User? creator, Branch? branch, IReadOnlyCollection<LoyaltyScheme> schemes, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices)
+    {
+        var invoiceDate = DateOnly.FromDateTime(invoice.InvoiceDate.Date);
+        var matchingSchemes = schemes
+            .Where(scheme => SchemeMatches(scheme, invoiceDate, customer, branch, zoneName))
+            .OrderBy(scheme => scheme.SchemeTag)
+            .ThenBy(scheme => scheme.SchemeName)
+            .ToList();
+
+        if (matchingSchemes.Count == 0) return [ToDto(invoice, customer, cityName, zoneName, creator, branch, null, null)];
+        return matchingSchemes.Select(scheme =>
+        {
+            var periodAmount = PeriodAmount(invoice, scheme, schemeInvoices);
+            return ToDto(invoice, customer, cityName, zoneName, creator, branch, scheme, CalculateSchemeResult(invoice.Amount, periodAmount, scheme));
+        }).ToList();
+    }
+
+    private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult)
+    {
+        var schemePoints = schemeResult?.Points ?? 0;
+        var isBooster = string.Equals(scheme?.SchemeTag, "Booster", StringComparison.OrdinalIgnoreCase);
+        return new NewInvoiceDto
         {
             Id = invoice.Id,
             SecondaryCustomerId = invoice.SecondaryCustomerId,
@@ -289,11 +372,22 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             ShopName = ShopName(customer),
             MobileNumber = MobileNumber(customer),
             CityName = cityName,
-            ZoneName = branch?.BranchName,
+            ZoneName = zoneName,
             InvoiceNumber = invoice.InvoiceNumber,
             InvoiceDate = invoice.InvoiceDate,
             Amount = invoice.Amount,
-            Points = invoice.Points,
+            Points = schemePoints,
+            SchemeId = scheme?.Id,
+            SchemeName = scheme?.SchemeName,
+            SchemeCode = scheme?.SchemeCode,
+            SchemeTag = scheme?.SchemeTag,
+            SchemeBasedOn = scheme?.BasedOn,
+            SchemeRewardValue = schemeResult?.RewardValue,
+            SchemePoints = schemePoints,
+            SchemeHintMessage = schemeResult?.HintMessage,
+            RegularWalletPoints = scheme is not null && !isBooster ? schemePoints : 0,
+            BoosterWalletPoints = isBooster ? schemePoints : 0,
+            Attachment = invoice.Attachment,
             ApprovalStatus = invoice.ApprovalStatus,
             ApprovalStatusLabel = StatusLabel(invoice.ApprovalStatus),
             ApprovalRemark = invoice.ApprovalRemark,
@@ -302,6 +396,83 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             CreatedAt = invoice.CreatedAt,
             UpdatedAt = invoice.UpdatedAt
         };
+    }
+
+    private static bool SchemeMatches(LoyaltyScheme scheme, DateOnly invoiceDate, Customer customer, Branch? branch, string? zoneName)
+    {
+        if (invoiceDate < scheme.StartDate || invoiceDate > scheme.EndDate) return false;
+        if (!CustomerTypeMatches(scheme.CustomerType)) return false;
+
+        if (string.Equals(scheme.AreaScope, "All", StringComparison.OrdinalIgnoreCase)) return true;
+        var values = ReadSchemeAreaValues(scheme.AreaValues);
+        if (values.Count == 0) return true;
+
+        return scheme.AreaScope switch
+        {
+            "Customer" => values.Any(value => string.Equals(value, customer.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, customer.CustomerCode, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, $"{customer.CustomerCode} - {customer.Name}", StringComparison.OrdinalIgnoreCase)),
+            "Branch" => branch is not null && values.Any(value => string.Equals(value, branch.BranchName, StringComparison.OrdinalIgnoreCase)),
+            "Zone" => !string.IsNullOrWhiteSpace(zoneName) && values.Any(value => string.Equals(value, zoneName, StringComparison.OrdinalIgnoreCase)),
+            _ => true
+        };
+    }
+
+    private static bool CustomerTypeMatches(string customerType) =>
+        string.Equals(customerType, "Retailer", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(customerType, "Retailer + Plumber", StringComparison.OrdinalIgnoreCase);
+
+    private static decimal PeriodAmount(NewInvoice invoice, LoyaltyScheme scheme, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices)
+    {
+        var startDate = scheme.StartDate.ToDateTime(TimeOnly.MinValue);
+        var endDate = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
+        return schemeInvoices
+            .Where(x => x.CustomerId == invoice.SecondaryCustomerId
+                && x.InvoiceDate >= startDate
+                && x.InvoiceDate <= endDate)
+            .Sum(x => x.Amount);
+    }
+
+    private static SchemeResult CalculateSchemeResult(decimal invoiceAmount, decimal cumulativeAmount, LoyaltyScheme scheme)
+    {
+        var slabs = scheme.Slabs
+            .Where(x => x.DeletedAt == null)
+            .OrderBy(x => x.ValueFrom)
+            .ThenBy(x => x.SortOrder)
+            .ToList();
+
+        var achieved = slabs.LastOrDefault(slab => cumulativeAmount >= slab.ValueFrom && (!slab.ValueTo.HasValue || cumulativeAmount <= slab.ValueTo.Value));
+        if (achieved is not null)
+        {
+            var points = string.Equals(scheme.BasedOn, "Percentage", StringComparison.OrdinalIgnoreCase)
+                ? Math.Round(invoiceAmount * achieved.RewardValue / 100, 2)
+                : achieved.RewardValue;
+
+            return new SchemeResult(points, achieved.RewardValue, null);
+        }
+
+        var next = slabs.FirstOrDefault(slab => cumulativeAmount < slab.ValueFrom);
+        if (next is null) return new SchemeResult(0, null, null);
+
+        var remaining = next.ValueFrom - cumulativeAmount;
+        var rewardText = string.Equals(scheme.BasedOn, "Percentage", StringComparison.OrdinalIgnoreCase)
+            ? $"{next.RewardValue:0.##}%"
+            : $"Rs. {next.RewardValue:0.##}";
+        return new SchemeResult(0, null, $"Add Rs. {remaining:0.##} more to get {rewardText}");
+    }
+
+    private static IReadOnlyCollection<string> ReadSchemeAreaValues(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
 
     private static string OwnerName(Customer customer) => ReadField(customer, "owner_name") ?? customer.Name;
 
@@ -316,6 +487,33 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
     private static ulong? CityId(Customer customer) =>
         ulong.TryParse(ReadField(customer, "city_id"), out var cityId) ? cityId : null;
+
+    private static ulong? AssignedEmployeeId(Customer customer) =>
+        FirstULong(ReadField(customer, "employee_id")) ?? FirstULong(ReadField(customer, "sales_executive_id")) ?? customer.ExecutiveId;
+
+    private static string? AssignedZoneName(Customer customer, IReadOnlyDictionary<ulong, string> zones) =>
+        zones.TryGetValue(customer.Id, out var zoneName) ? zoneName : null;
+
+    private static ulong? FirstULong(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var first = value.Trim();
+        if (first.StartsWith("[", StringComparison.Ordinal))
+        {
+            try
+            {
+                var values = JsonSerializer.Deserialize<List<ulong>>(first, JsonOptions);
+                return values?.FirstOrDefault(x => x > 0);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        first = first.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? first;
+        return ulong.TryParse(first, out var parsed) ? parsed : null;
+    }
 
     private static string? CityName(Customer customer, IReadOnlyDictionary<ulong, string> cities)
     {
@@ -353,4 +551,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         public User? Creator { get; init; }
         public Branch? Branch { get; init; }
     }
+
+    private sealed record SchemeInvoiceAmount(ulong InvoiceId, ulong CustomerId, DateTime InvoiceDate, decimal Amount);
+
+    private sealed record SchemeResult(decimal Points, decimal? RewardValue, string? HintMessage);
 }

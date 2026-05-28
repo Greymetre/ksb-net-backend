@@ -1,11 +1,13 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Api.Filters;
+using Application.Common;
 using Application.DTOs.Customers;
 using Application.DTOs.MasterData;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Shared.Exceptions;
 
 namespace Api.Controllers;
 
@@ -141,6 +143,7 @@ public sealed class CustomersController : ControllerBase
         SetField(fields, "profile_image", profileImage);
         SetField(fields, "gst_attachment", await SaveFileAsync(form.GstAttachment, "gst-attachments", cancellationToken));
         SetField(fields, "pan_attachment", await SaveFileAsync(form.PanAttachment, "pan-attachments", cancellationToken));
+        SetField(fields, "aadhar_attachment", await SaveFileAsync(form.AadharAttachment, "aadhar-attachments", cancellationToken));
         SetField(fields, "bank_proof", await SaveFileAsync(form.BankProof, "bank-proofs", cancellationToken));
         SetField(fields, "shop_photo", await SaveFileAsync(form.ShopPhoto, "shop-photos", cancellationToken));
         SetField(fields, "mou_file", await SaveFileAsync(form.MouFile, "mou-files", cancellationToken));
@@ -190,6 +193,10 @@ public sealed class CustomersController : ControllerBase
     private async Task<string?> SaveFileAsync(IFormFile? file, string folder, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0) return null;
+        if (IsRetailerImageFolder(folder) && !IsImageFile(file))
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Retailer KYC attachments must be image files only.");
+        }
 
         var extension = Path.GetExtension(file.FileName);
         var fileName = $"{Guid.NewGuid():N}{extension}";
@@ -199,6 +206,15 @@ public sealed class CustomersController : ControllerBase
         await using var stream = System.IO.File.Create(fullPath);
         await file.CopyToAsync(stream, cancellationToken);
         return $"/uploads/customers/{folder}/{fileName}";
+    }
+
+    private static bool IsRetailerImageFolder(string folder) =>
+        folder is "gst-attachments" or "pan-attachments" or "aadhar-attachments" or "bank-proofs" or "shop-photos";
+
+    private static bool IsImageFile(IFormFile file)
+    {
+        if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return true;
+        return Path.GetExtension(file.FileName).ToLowerInvariant() is ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp";
     }
 
     private static void SetField(IDictionary<string, string?> fields, string key, string? value)
@@ -256,6 +272,9 @@ public sealed class CustomerFormRequestDto
 
     [FromForm(Name = "pan_attachment")]
     public IFormFile? PanAttachment { get; set; }
+
+    [FromForm(Name = "aadhar_attachment")]
+    public IFormFile? AadharAttachment { get; set; }
 
     [FromForm(Name = "bank_proof")]
     public IFormFile? BankProof { get; set; }

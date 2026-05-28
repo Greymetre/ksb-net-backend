@@ -13,6 +13,7 @@ public sealed class NewInvoice : BaseEntity
     public DateTime InvoiceDate { get; set; }
     public decimal Amount { get; set; }
     public decimal Points { get; set; }
+    public string? Attachment { get; set; }
     public int ApprovalStatus { get; set; }
     public string? ApprovalRemark { get; set; }
     public ulong? ApprovedSsBy { get; set; }

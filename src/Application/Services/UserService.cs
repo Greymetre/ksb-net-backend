@@ -390,7 +390,7 @@ public sealed class UserService : IUserService
 
         for (var column = 0; column < headings.Length; column++)
         {
-            worksheet.Cell(1, column + 1).Value = headings[column];
+            worksheet.Cell(1, column + 1).Value = FormatHeading(headings[column]);
             worksheet.Cell(1, column + 1).Style.Font.Bold = true;
         }
 
@@ -399,7 +399,7 @@ public sealed class UserService : IUserService
         {
             for (var column = 0; column < row.Length; column++)
             {
-                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(row[column]);
+                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(FormatExportValue(headings[column], row[column]));
             }
 
             rowNumber++;
@@ -461,6 +461,23 @@ public sealed class UserService : IUserService
 
     private static string NormalizeHeading(string heading) =>
         heading.Trim().ToLowerInvariant().Replace(" ", "_").Replace("-", "_").Replace("(", "").Replace(")", "").Replace(",", "");
+
+    private static string FormatHeading(string heading) =>
+        CultureInfo.InvariantCulture.TextInfo.ToTitleCase(heading.Replace("_", " ").Trim().ToLowerInvariant());
+
+    private static object? FormatExportValue(string heading, object? value)
+    {
+        if (value is not string text || string.IsNullOrWhiteSpace(text)) return value;
+        var normalized = NormalizeHeading(heading);
+        if (normalized is "id" or "employees_code" or "mobile" or "email" or "date_of_joining" or "date_of_birth" or "date_of_confirmation"
+            or "date_of_leaving" or "designation_code" or "employee_super_code" or "base_location_coordinates_latitude_longitude"
+            or "reporting_id" or "role_ids" or "designation_id" or "branch_id" or "division_id" or "department_id")
+        {
+            return value;
+        }
+
+        return CultureInfo.InvariantCulture.TextInfo.ToTitleCase(text.Trim().ToLowerInvariant());
+    }
 
     private static (string FirstName, string LastName) SplitName(string name)
     {

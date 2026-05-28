@@ -520,7 +520,7 @@ public sealed class MasterDataService : IMasterDataService
 
         for (var column = 0; column < headings.Length; column++)
         {
-            worksheet.Cell(1, column + 1).Value = headings[column];
+            worksheet.Cell(1, column + 1).Value = TitleCaseHeading(headings[column]);
             worksheet.Cell(1, column + 1).Style.Font.Bold = true;
         }
 
@@ -529,7 +529,7 @@ public sealed class MasterDataService : IMasterDataService
         {
             for (var column = 0; column < row.Length; column++)
             {
-                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(row[column]);
+                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(FormatExportValue(headings[column], row[column]));
             }
 
             rowNumber++;
@@ -598,6 +598,16 @@ public sealed class MasterDataService : IMasterDataService
 
     private static string NormalizeHeading(string heading) =>
         heading.Trim().ToLowerInvariant().Replace(" ", "_");
+
+    private static string TitleCaseHeading(string heading) => ToTitleCase(heading.Replace("_", " ")) ?? heading;
+
+    private static object? FormatExportValue(string heading, object? value)
+    {
+        if (value is not string text || string.IsNullOrWhiteSpace(text)) return value;
+        var normalized = NormalizeHeading(heading);
+        if (normalized is "id" or "country_id" or "state_id" or "district_id" or "city_id" or "pincode" or "gst_code" or "branch_code" or "warehouse_id" or "active" or "created_at") return value;
+        return ToTitleCase(text);
+    }
 
     private static string? ToTitleCase(string? value)
     {

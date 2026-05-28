@@ -1423,6 +1423,7 @@ namespace Infrastructure.Migrations
   `invoice_date` date NOT NULL,
   `amount` decimal(15,2) NOT NULL,
   `points` decimal(15,2) NOT NULL DEFAULT 0.00,
+  `attachment` varchar(500) DEFAULT NULL,
   `approval_status` tinyint(4) NOT NULL DEFAULT 0,
   `approval_remark` text DEFAULT NULL,
   `approved_ss_by` bigint(20) UNSIGNED DEFAULT NULL,
