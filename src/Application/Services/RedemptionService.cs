@@ -138,7 +138,7 @@ public sealed class RedemptionService : IRedemptionService
     {
         var redemptions = await _repository.GetCustomerRedemptionsAsync(customer.Id, cancellationToken);
         var schemes = invoices
-            .Where(x => x.SchemeId.HasValue && x.SchemePoints > 0)
+            .Where(x => x.SchemeId.HasValue && x.SchemePoints > 0 && x.ApprovalStatus == 3)
             .GroupBy(x => new { x.SchemeId, x.SchemeName, WalletType = IsBooster(x.SchemeTag) ? "Booster" : "Regular" })
             .Select(group =>
             {

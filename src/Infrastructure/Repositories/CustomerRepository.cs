@@ -346,6 +346,7 @@ public sealed class CustomerRepository : ICustomerRepository
     {
         var rows = await (from invoice in _dbContext.NewInvoices.AsNoTracking()
                           where invoice.SecondaryCustomerId == customer.Id
+                          && invoice.ApprovedHoBy == 1 
                           join creatorRow in _dbContext.Users.AsNoTracking() on invoice.CreatedBy equals creatorRow.Id into creators
                           from creator in creators.DefaultIfEmpty()
                           join branchRow in _dbContext.Branches.AsNoTracking() on creator.PrimaryBranchId equals branchRow.Id into branches

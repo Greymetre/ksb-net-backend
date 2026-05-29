@@ -23,6 +23,7 @@ public sealed class NewInvoiceDto
     public string? SchemeBasedOn { get; set; }
     public decimal? SchemeRewardValue { get; set; }
     public decimal SchemePoints { get; set; }
+    public string? TierName { get; set; }
     public string? SchemeHintMessage { get; set; }
     public decimal RegularWalletPoints { get; set; }
     public decimal BoosterWalletPoints { get; set; }

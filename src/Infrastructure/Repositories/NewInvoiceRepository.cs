@@ -434,6 +434,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             SchemeBasedOn = scheme?.BasedOn,
             SchemeRewardValue = schemeResult?.RewardValue,
             SchemePoints = schemePoints,
+            TierName = schemeResult?.TierName,
             SchemeHintMessage = schemeResult?.HintMessage,
             RegularWalletPoints = scheme is not null && !isBooster ? schemePoints : 0,
             BoosterWalletPoints = isBooster ? schemePoints : 0,
@@ -498,17 +499,17 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
                 ? Math.Round(invoiceAmount * achieved.RewardValue / 100, 2)
                 : achieved.RewardValue;
 
-            return new SchemeResult(points, achieved.RewardValue, null);
+            return new SchemeResult(points, achieved.RewardValue, achieved.TierName, null);
         }
 
         var next = slabs.FirstOrDefault(slab => cumulativeAmount < slab.ValueFrom);
-        if (next is null) return new SchemeResult(0, null, null);
+        if (next is null) return new SchemeResult(0, null, null, null);
 
         var remaining = next.ValueFrom - cumulativeAmount;
         var rewardText = string.Equals(scheme.BasedOn, "Percentage", StringComparison.OrdinalIgnoreCase)
             ? $"{next.RewardValue:0.##}%"
             : $"Rs. {next.RewardValue:0.##}";
-        return new SchemeResult(0, null, $"Add Rs. {remaining:0.##} more to get {rewardText}");
+        return new SchemeResult(0, null, null, $"Add Rs. {remaining:0.##} more to get {rewardText}");
     }
 
     private static IReadOnlyCollection<string> ReadSchemeAreaValues(string? json)
@@ -613,5 +614,5 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
     private sealed record SchemeInvoiceAmount(ulong InvoiceId, ulong CustomerId, DateTime InvoiceDate, decimal Amount);
 
-    private sealed record SchemeResult(decimal Points, decimal? RewardValue, string? HintMessage);
+    private sealed record SchemeResult(decimal Points, decimal? RewardValue, string? TierName, string? HintMessage);
 }
