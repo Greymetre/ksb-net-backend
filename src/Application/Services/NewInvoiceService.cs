@@ -34,13 +34,15 @@ public sealed class NewInvoiceService : INewInvoiceService
     {
         var invoices = await _repository.GetInvoicesAsync(filter, actorUserId, cancellationToken);
         return CreateWorkbook("new-invoices.xlsx",
-            ["retailer_id", "customer", "shop", "mobile", "city", "zone", "invoice_date", "invoice_number", "amount", "scheme_name", "points", "scheme_hint", "attachment", "status"],
+            ["retailer_id", "customer", "shop", "mobile", "assigned_distributor", "assigned_employee", "city", "zone", "invoice_date", "invoice_number", "amount", "scheme_name", "points", "scheme_hint", "attachment", "status", "created_by", "created_at"],
             invoices.Select(x => new object?[]
             {
                 x.RetailerCode,
                 x.CustomerName,
                 x.ShopName,
                 x.MobileNumber,
+                x.AssignedDistributorName,
+                x.AssignedEmployeeName,
                 x.CityName,
                 x.ZoneName,
                 x.InvoiceDate,
@@ -50,7 +52,9 @@ public sealed class NewInvoiceService : INewInvoiceService
                 x.SchemePoints,
                 x.SchemeHintMessage,
                 x.Attachment,
-                x.ApprovalStatusLabel
+                x.ApprovalStatusLabel,
+                x.CreatedByName,
+                x.CreatedAt
             }));
     }
 
@@ -261,9 +265,11 @@ public sealed class NewInvoiceService : INewInvoiceService
     {
         using var workbook = new XLWorkbook();
         var worksheet = workbook.AddWorksheet("Sheet1");
+        worksheet.Style.Font.FontName = "Calibri";
+        worksheet.Style.Font.FontSize = 9;
         for (var column = 0; column < headings.Length; column++)
         {
-            worksheet.Cell(1, column + 1).Value = headings[column].Replace("_", " ").ToUpperInvariant();
+            worksheet.Cell(1, column + 1).Value = TitleCase(headings[column].Replace("_", " "));
             worksheet.Cell(1, column + 1).Style.Font.Bold = true;
         }
 
@@ -283,6 +289,9 @@ public sealed class NewInvoiceService : INewInvoiceService
         workbook.SaveAs(stream);
         return new MasterDataFileDto { FileName = fileName, Content = stream.ToArray() };
     }
+
+    private static string TitleCase(string value) =>
+        System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(value.Trim().ToLowerInvariant());
 
     private static LaravelHttpException Http(int statusCode, object message) => new(statusCode, message);
 }

@@ -111,6 +111,22 @@ public sealed class CustomersController : ControllerBase
         return Ok(response);
     }
 
+    [RequirePermission("customer_kyc_access", "customer_edit")]
+    [HttpPost("{id}/kyc/{documentKey}/approve")]
+    public async Task<IActionResult> ApproveKycDocument(ulong id, string documentKey, [FromBody] CustomerKycApprovalRequestDto request, CancellationToken cancellationToken)
+    {
+        var response = await _customerService.ApproveKycDocumentAsync(id, documentKey, request.Remark, CurrentUserId(), cancellationToken);
+        return Ok(response);
+    }
+
+    [RequirePermission("customer_kyc_access", "customer_edit")]
+    [HttpPost("{id}/kyc/{documentKey}/reject")]
+    public async Task<IActionResult> RejectKycDocument(ulong id, string documentKey, [FromBody] CustomerKycApprovalRequestDto request, CancellationToken cancellationToken)
+    {
+        var response = await _customerService.RejectKycDocumentAsync(id, documentKey, request.Remark, CurrentUserId(), cancellationToken);
+        return Ok(response);
+    }
+
     [RequirePermission("customer_delete")]
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteCustomer(ulong id, CancellationToken cancellationToken)
@@ -141,10 +157,10 @@ public sealed class CustomersController : ControllerBase
 
         SetField(fields, "shop_image", shopImage);
         SetField(fields, "profile_image", profileImage);
-        SetField(fields, "gst_attachment", await SaveFileAsync(form.GstAttachment, "gst-attachments", cancellationToken));
-        SetField(fields, "pan_attachment", await SaveFileAsync(form.PanAttachment, "pan-attachments", cancellationToken));
-        SetField(fields, "aadhar_attachment", await SaveFileAsync(form.AadharAttachment, "aadhar-attachments", cancellationToken));
-        SetField(fields, "bank_proof", await SaveFileAsync(form.BankProof, "bank-proofs", cancellationToken));
+        SetKycFileField(fields, "gst", "gst_attachment", await SaveFileAsync(form.GstAttachment, "gst-attachments", cancellationToken));
+        SetKycFileField(fields, "pan", "pan_attachment", await SaveFileAsync(form.PanAttachment, "pan-attachments", cancellationToken));
+        SetKycFileField(fields, "aadhar", "aadhar_attachment", await SaveFileAsync(form.AadharAttachment, "aadhar-attachments", cancellationToken));
+        SetKycFileField(fields, "bank", "bank_proof", await SaveFileAsync(form.BankProof, "bank-proofs", cancellationToken));
         SetField(fields, "shop_photo", await SaveFileAsync(form.ShopPhoto, "shop-photos", cancellationToken));
         SetField(fields, "mou_file", await SaveFileAsync(form.MouFile, "mou-files", cancellationToken));
 
@@ -220,6 +236,19 @@ public sealed class CustomersController : ControllerBase
     private static void SetField(IDictionary<string, string?> fields, string key, string? value)
     {
         if (!string.IsNullOrWhiteSpace(value)) fields[key] = value;
+    }
+
+    private static void SetKycFileField(IDictionary<string, string?> fields, string documentKey, string attachmentKey, string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return;
+
+        fields[attachmentKey] = value;
+        var prefix = $"{documentKey}_kyc";
+        fields[$"{prefix}_status"] = "pending";
+        fields.Remove($"{prefix}_remark");
+        fields.Remove($"{prefix}_action_by");
+        fields.Remove($"{prefix}_action_by_name");
+        fields.Remove($"{prefix}_action_at");
     }
 }
 

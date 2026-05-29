@@ -31,9 +31,11 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
         var cities = await LoadCitiesAsync(rows.Select(x => CityId(x.Customer)), cancellationToken);
         var assignedZones = await LoadAssignedZoneNamesAsync(rows.Select(x => x.Customer), cancellationToken);
+        var assignedDistributors = await LoadAssignedDistributorNamesAsync(rows.Select(x => x.Customer), cancellationToken);
+        var assignedEmployees = await LoadAssignedEmployeeNamesAsync(rows.Select(x => x.Customer), cancellationToken);
         var schemes = await LoadSchemesAsync(rows.Select(x => x.Invoice.InvoiceDate), cancellationToken);
         var schemeInvoices = await LoadSchemeInvoicesAsync(rows.Select(x => x.Customer.Id), schemes, cancellationToken);
-        return rows.SelectMany(x => ToSchemeDtos(x.Invoice, x.Customer, CityName(x.Customer, cities), AssignedZoneName(x.Customer, assignedZones) ?? x.Branch?.BranchName, x.Creator, x.Branch, schemes, schemeInvoices)).ToList();
+        return rows.SelectMany(x => ToSchemeDtos(x.Invoice, x.Customer, CityName(x.Customer, cities), AssignedZoneName(x.Customer, assignedZones) ?? x.Branch?.BranchName, AssignedDistributorName(x.Customer, assignedDistributors), AssignedEmployeeName(x.Customer, assignedEmployees), x.Creator, x.Branch, schemes, schemeInvoices)).ToList();
     }
 
     public async Task<NewInvoiceDto?> GetInvoiceAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
@@ -44,9 +46,11 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
         var cities = await LoadCitiesAsync([CityId(row.Customer)], cancellationToken);
         var assignedZones = await LoadAssignedZoneNamesAsync([row.Customer], cancellationToken);
+        var assignedDistributors = await LoadAssignedDistributorNamesAsync([row.Customer], cancellationToken);
+        var assignedEmployees = await LoadAssignedEmployeeNamesAsync([row.Customer], cancellationToken);
         var schemes = await LoadSchemesAsync([row.Invoice.InvoiceDate], cancellationToken);
         var schemeInvoices = await LoadSchemeInvoicesAsync([row.Customer.Id], schemes, cancellationToken);
-        var dto = ToSchemeDtos(row.Invoice, row.Customer, CityName(row.Customer, cities), AssignedZoneName(row.Customer, assignedZones) ?? row.Branch?.BranchName, row.Creator, row.Branch, schemes, schemeInvoices).First();
+        var dto = ToSchemeDtos(row.Invoice, row.Customer, CityName(row.Customer, cities), AssignedZoneName(row.Customer, assignedZones) ?? row.Branch?.BranchName, AssignedDistributorName(row.Customer, assignedDistributors), AssignedEmployeeName(row.Customer, assignedEmployees), row.Creator, row.Branch, schemes, schemeInvoices).First();
         dto.ApprovalLogs = await GetApprovalLogsAsync(id, cancellationToken);
         return dto;
     }
@@ -270,6 +274,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         var customerEmployeeIds = customers
             .Select(customer => new { CustomerId = customer.Id, EmployeeId = AssignedEmployeeId(customer) })
             .Where(x => x.EmployeeId.HasValue)
+            .GroupBy(x => x.CustomerId)
+            .Select(x => x.First())
             .ToList();
 
         var employeeIds = customerEmployeeIds.Select(x => x.EmployeeId!.Value).Distinct().ToArray();
@@ -286,6 +292,48 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         return customerEmployeeIds
             .Where(x => x.EmployeeId.HasValue && employeeZones.ContainsKey(x.EmployeeId.Value))
             .ToDictionary(x => x.CustomerId, x => employeeZones[x.EmployeeId!.Value]);
+    }
+
+    private async Task<Dictionary<ulong, string>> LoadAssignedEmployeeNamesAsync(IEnumerable<Customer> customers, CancellationToken cancellationToken)
+    {
+        var customerEmployeeIds = customers
+            .Select(customer => new { CustomerId = customer.Id, EmployeeId = AssignedEmployeeId(customer) })
+            .Where(x => x.EmployeeId.HasValue)
+            .GroupBy(x => x.CustomerId)
+            .Select(x => x.First())
+            .ToList();
+
+        var employeeIds = customerEmployeeIds.Select(x => x.EmployeeId!.Value).Distinct().ToArray();
+        if (employeeIds.Length == 0) return [];
+
+        var employeeNames = await _dbContext.Users.AsNoTracking()
+            .Where(x => employeeIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+
+        return customerEmployeeIds
+            .Where(x => x.EmployeeId.HasValue && employeeNames.ContainsKey(x.EmployeeId.Value))
+            .ToDictionary(x => x.CustomerId, x => employeeNames[x.EmployeeId!.Value]);
+    }
+
+    private async Task<Dictionary<ulong, string>> LoadAssignedDistributorNamesAsync(IEnumerable<Customer> customers, CancellationToken cancellationToken)
+    {
+        var customerDistributorIds = customers
+            .Select(customer => new { CustomerId = customer.Id, DistributorId = AssignedDistributorId(customer) })
+            .Where(x => x.DistributorId.HasValue)
+            .GroupBy(x => x.CustomerId)
+            .Select(x => x.First())
+            .ToList();
+
+        var distributorIds = customerDistributorIds.Select(x => x.DistributorId!.Value).Distinct().ToArray();
+        if (distributorIds.Length == 0) return [];
+
+        var distributorNames = await _dbContext.Customers.AsNoTracking()
+            .Where(x => distributorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.Name, cancellationToken);
+
+        return customerDistributorIds
+            .Where(x => x.DistributorId.HasValue && distributorNames.ContainsKey(x.DistributorId.Value))
+            .ToDictionary(x => x.CustomerId, x => distributorNames[x.DistributorId!.Value]);
     }
 
     private async Task<IReadOnlyCollection<NewInvoiceApprovalLogDto>> GetApprovalLogsAsync(ulong invoiceId, CancellationToken cancellationToken) =>
@@ -342,7 +390,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             .ToListAsync(cancellationToken);
     }
 
-    private static IReadOnlyCollection<NewInvoiceDto> ToSchemeDtos(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, User? creator, Branch? branch, IReadOnlyCollection<LoyaltyScheme> schemes, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices)
+    private static IReadOnlyCollection<NewInvoiceDto> ToSchemeDtos(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, IReadOnlyCollection<LoyaltyScheme> schemes, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices)
     {
         var invoiceDate = DateOnly.FromDateTime(invoice.InvoiceDate.Date);
         var matchingSchemes = schemes
@@ -351,15 +399,15 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             .ThenBy(scheme => scheme.SchemeName)
             .ToList();
 
-        if (matchingSchemes.Count == 0) return [ToDto(invoice, customer, cityName, zoneName, creator, branch, null, null)];
+        if (matchingSchemes.Count == 0) return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null)];
         return matchingSchemes.Select(scheme =>
         {
             var periodAmount = PeriodAmount(invoice, scheme, schemeInvoices);
-            return ToDto(invoice, customer, cityName, zoneName, creator, branch, scheme, CalculateSchemeResult(invoice.Amount, periodAmount, scheme));
+            return ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, scheme, CalculateSchemeResult(invoice.Amount, periodAmount, scheme));
         }).ToList();
     }
 
-    private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult)
+    private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult)
     {
         var schemePoints = schemeResult?.Points ?? 0;
         var isBooster = string.Equals(scheme?.SchemeTag, "Booster", StringComparison.OrdinalIgnoreCase);
@@ -373,6 +421,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             MobileNumber = MobileNumber(customer),
             CityName = cityName,
             ZoneName = zoneName,
+            AssignedDistributorName = assignedDistributorName,
+            AssignedEmployeeName = assignedEmployeeName,
             InvoiceNumber = invoice.InvoiceNumber,
             InvoiceDate = invoice.InvoiceDate,
             Amount = invoice.Amount,
@@ -491,8 +541,17 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     private static ulong? AssignedEmployeeId(Customer customer) =>
         FirstULong(ReadField(customer, "employee_id")) ?? FirstULong(ReadField(customer, "sales_executive_id")) ?? customer.ExecutiveId;
 
+    private static ulong? AssignedDistributorId(Customer customer) =>
+        FirstULong(ReadField(customer, "distributor_name")) ?? FirstULong(ReadField(customer, "agri_distributor")) ?? customer.ParentId;
+
     private static string? AssignedZoneName(Customer customer, IReadOnlyDictionary<ulong, string> zones) =>
         zones.TryGetValue(customer.Id, out var zoneName) ? zoneName : null;
+
+    private static string? AssignedEmployeeName(Customer customer, IReadOnlyDictionary<ulong, string> employees) =>
+        employees.TryGetValue(customer.Id, out var employeeName) ? employeeName : null;
+
+    private static string? AssignedDistributorName(Customer customer, IReadOnlyDictionary<ulong, string> distributors) =>
+        distributors.TryGetValue(customer.Id, out var distributorName) ? distributorName : null;
 
     private static ulong? FirstULong(string? value)
     {

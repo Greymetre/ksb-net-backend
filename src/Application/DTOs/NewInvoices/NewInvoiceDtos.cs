@@ -10,6 +10,8 @@ public sealed class NewInvoiceDto
     public string MobileNumber { get; set; } = string.Empty;
     public string? CityName { get; set; }
     public string? ZoneName { get; set; }
+    public string? AssignedDistributorName { get; set; }
+    public string? AssignedEmployeeName { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
     public decimal Amount { get; set; }

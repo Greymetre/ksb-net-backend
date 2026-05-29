@@ -77,6 +77,7 @@ public sealed class CustomerRepository : ICustomerRepository
         if (row is null) return null;
         var dto = ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName);
         await AttachAddressNamesAsync([dto], cancellationToken);
+        await AttachPointSummaryAsync(dto, row.Customer, cancellationToken);
         return dto;
     }
 
@@ -141,6 +142,41 @@ public sealed class CustomerRepository : ICustomerRepository
 
         await _dbContext.SaveChangesAsync(cancellationToken);
         return ToCustomerDto(customer, null, null);
+    }
+
+    public async Task<CustomerDto?> UpdateKycStatusAsync(ulong id, string documentKey, string status, string? remark, ulong actorUserId, CancellationToken cancellationToken)
+    {
+        var customer = await _dbContext.Customers.FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, cancellationToken);
+        if (customer is null) return null;
+
+        var fields = DeserializeFields(customer.CustomFields);
+        var attachmentKey = KycAttachmentKey(documentKey);
+        if (!fields.TryGetValue(attachmentKey, out var attachment) || string.IsNullOrWhiteSpace(attachment))
+        {
+            throw new InvalidOperationException("KYC document is not uploaded.");
+        }
+
+        var approverName = await _dbContext.Users.AsNoTracking()
+            .Where(x => x.Id == actorUserId)
+            .Select(x => x.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var prefix = $"{documentKey}_kyc";
+        fields[$"{prefix}_status"] = status;
+        fields[$"{prefix}_remark"] = NormalizeText(remark);
+        fields[$"{prefix}_action_by"] = actorUserId.ToString();
+        fields[$"{prefix}_action_by_name"] = NormalizeText(approverName);
+        fields[$"{prefix}_action_at"] = DateTime.UtcNow.ToString("O");
+
+        customer.CustomFields = SerializeFields(fields);
+        customer.UpdatedBy = actorUserId;
+        customer.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var dto = ToCustomerDto(customer, null, null);
+        await AttachAddressNamesAsync([dto], cancellationToken);
+        await AttachPointSummaryAsync(dto, customer, cancellationToken);
+        return dto;
     }
 
     public async Task<CustomerDto?> SetCustomerActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken)
@@ -306,6 +342,145 @@ public sealed class CustomerRepository : ICustomerRepository
         }
     }
 
+    private async Task AttachPointSummaryAsync(CustomerDto customerDto, Customer customer, CancellationToken cancellationToken)
+    {
+        var rows = await (from invoice in _dbContext.NewInvoices.AsNoTracking()
+                          where invoice.SecondaryCustomerId == customer.Id
+                          join creatorRow in _dbContext.Users.AsNoTracking() on invoice.CreatedBy equals creatorRow.Id into creators
+                          from creator in creators.DefaultIfEmpty()
+                          join branchRow in _dbContext.Branches.AsNoTracking() on creator.PrimaryBranchId equals branchRow.Id into branches
+                          from branch in branches.DefaultIfEmpty()
+                          select new CustomerInvoiceRow(invoice, branch))
+            .ToListAsync(cancellationToken);
+
+        if (rows.Count > 0)
+        {
+            var dates = rows.Select(x => DateOnly.FromDateTime(x.Invoice.InvoiceDate.Date)).ToArray();
+            var minDate = dates.Min();
+            var maxDate = dates.Max();
+            var schemes = await _dbContext.LoyaltySchemes.AsNoTracking()
+                .Include(x => x.Slabs)
+                .Where(x => x.DeletedAt == null
+                    && x.Active == "Y"
+                    && x.Status == "Live"
+                    && x.SchemeType == "Invoice"
+                    && x.StartDate <= maxDate
+                    && x.EndDate >= minDate)
+                .ToListAsync(cancellationToken);
+
+            var zoneName = await LoadAssignedZoneNameAsync(customer, cancellationToken);
+
+            foreach (var row in rows)
+            {
+                var invoiceDate = DateOnly.FromDateTime(row.Invoice.InvoiceDate.Date);
+                var matchingSchemes = schemes.Where(scheme => SchemeMatchesCustomer(scheme, invoiceDate, customer, row.Branch, zoneName));
+                foreach (var scheme in matchingSchemes)
+                {
+                    var periodAmount = PeriodAmount(customer.Id, scheme, rows.Select(x => x.Invoice));
+                    var points = CalculateSchemePoints(row.Invoice.Amount, periodAmount, scheme);
+                    if (points <= 0) continue;
+
+                    customerDto.TotalPoints += points;
+                    if (string.Equals(scheme.SchemeTag, "Booster", StringComparison.OrdinalIgnoreCase)) customerDto.TotalBoosterPoints += points;
+                    else customerDto.TotalRegularPoints += points;
+                }
+            }
+        }
+
+        var redemptionRows = await _dbContext.LoyaltyRedemptions.AsNoTracking()
+            .Where(x => x.DeletedAt == null && x.CustomerId == customer.Id)
+            .GroupBy(x => x.Status)
+            .Select(x => new { Status = x.Key, Points = x.Sum(row => row.Points) })
+            .ToListAsync(cancellationToken);
+
+        customerDto.TotalRedeemPoints = redemptionRows
+            .Where(x => x.Status is LoyaltyRedemption.StatusPending or LoyaltyRedemption.StatusApproved)
+            .Sum(x => x.Points);
+        customerDto.TotalRejectedPoints = redemptionRows
+            .Where(x => x.Status == LoyaltyRedemption.StatusRejected)
+            .Sum(x => x.Points);
+        customerDto.TotalBalancePoints = Math.Max(0, customerDto.TotalPoints - customerDto.TotalRedeemPoints);
+    }
+
+    private async Task<string?> LoadAssignedZoneNameAsync(Customer customer, CancellationToken cancellationToken)
+    {
+        var employeeId = FirstULong(ReadCustomerField(customer, "employee_id"))
+            ?? FirstULong(ReadCustomerField(customer, "sales_executive_id"))
+            ?? customer.ExecutiveId;
+
+        if (!employeeId.HasValue) return null;
+
+        return await (from user in _dbContext.Users.AsNoTracking()
+                      where user.Id == employeeId.Value
+                      join divisionRow in _dbContext.Divisions.AsNoTracking() on user.DivisionId equals divisionRow.Id into divisions
+                      from division in divisions.DefaultIfEmpty()
+                      select division != null ? division.DivisionName : null)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private static bool SchemeMatchesCustomer(LoyaltyScheme scheme, DateOnly invoiceDate, Customer customer, Branch? branch, string? zoneName)
+    {
+        if (invoiceDate < scheme.StartDate || invoiceDate > scheme.EndDate) return false;
+        if (!CustomerTypeMatches(scheme.CustomerType)) return false;
+
+        if (string.Equals(scheme.AreaScope, "All", StringComparison.OrdinalIgnoreCase)) return true;
+        var values = ReadSchemeAreaValues(scheme.AreaValues);
+        if (values.Count == 0) return true;
+
+        return scheme.AreaScope switch
+        {
+            "Customer" => values.Any(value => string.Equals(value, customer.Name, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, customer.CustomerCode, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(value, $"{customer.CustomerCode} - {customer.Name}", StringComparison.OrdinalIgnoreCase)),
+            "Branch" => branch is not null && values.Any(value => string.Equals(value, branch.BranchName, StringComparison.OrdinalIgnoreCase)),
+            "Zone" => !string.IsNullOrWhiteSpace(zoneName) && values.Any(value => string.Equals(value, zoneName, StringComparison.OrdinalIgnoreCase)),
+            _ => true
+        };
+    }
+
+    private static bool CustomerTypeMatches(string customerType) =>
+        string.Equals(customerType, "Retailer", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(customerType, "Retailer + Plumber", StringComparison.OrdinalIgnoreCase);
+
+    private static decimal PeriodAmount(ulong customerId, LoyaltyScheme scheme, IEnumerable<NewInvoice> invoices)
+    {
+        var startDate = scheme.StartDate.ToDateTime(TimeOnly.MinValue);
+        var endDate = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
+        return invoices
+            .Where(x => x.SecondaryCustomerId == customerId
+                && x.InvoiceDate >= startDate
+                && x.InvoiceDate <= endDate)
+            .Sum(x => x.Amount);
+    }
+
+    private static decimal CalculateSchemePoints(decimal invoiceAmount, decimal periodAmount, LoyaltyScheme scheme)
+    {
+        var achieved = scheme.Slabs
+            .Where(x => x.DeletedAt == null)
+            .OrderBy(x => x.ValueFrom)
+            .ThenBy(x => x.SortOrder)
+            .LastOrDefault(slab => periodAmount >= slab.ValueFrom && (!slab.ValueTo.HasValue || periodAmount <= slab.ValueTo.Value));
+
+        if (achieved is null) return 0;
+
+        return string.Equals(scheme.BasedOn, "Percentage", StringComparison.OrdinalIgnoreCase)
+            ? Math.Round(invoiceAmount * achieved.RewardValue / 100, 2)
+            : achieved.RewardValue;
+    }
+
+    private static IReadOnlyCollection<string> ReadSchemeAreaValues(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     private static CustomerDto ToCustomerDto(Customer customer, string? createdByName, string? parentName)
     {
         var fields = DeserializeFields(customer.CustomFields);
@@ -367,8 +542,38 @@ public sealed class CustomerRepository : ICustomerRepository
     private static string? ReadCustomerField(Customer customer, string key) =>
         ReadField(DeserializeFields(customer.CustomFields), key);
 
+    private static string KycAttachmentKey(string documentKey) => documentKey switch
+    {
+        "gst" => "gst_attachment",
+        "pan" => "pan_attachment",
+        "aadhar" => "aadhar_attachment",
+        "bank" => "bank_proof",
+        _ => documentKey
+    };
+
     private static ulong? ReadULong(IReadOnlyDictionary<string, string?> fields, string key) =>
         ulong.TryParse(ReadField(fields, key), out var parsed) ? parsed : null;
+
+    private static ulong? FirstULong(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var first = value.Trim();
+        if (first.StartsWith("[", StringComparison.Ordinal))
+        {
+            try
+            {
+                var values = JsonSerializer.Deserialize<List<ulong>>(first, JsonOptions);
+                return values?.FirstOrDefault(x => x > 0);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
+        first = first.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? first;
+        return ulong.TryParse(first, out var parsed) ? parsed : null;
+    }
 
     private static string? NormalizeText(string? value)
     {
@@ -466,4 +671,6 @@ public sealed class CustomerRepository : ICustomerRepository
         var parts = name.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return (parts.FirstOrDefault() ?? name, parts.Length > 1 ? parts[1] : string.Empty);
     }
+
+    private sealed record CustomerInvoiceRow(NewInvoice Invoice, Branch? Branch);
 }

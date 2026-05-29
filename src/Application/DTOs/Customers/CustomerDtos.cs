@@ -29,6 +29,12 @@ public sealed class CustomerDto
     public ulong? CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime? CreatedAt { get; set; }
+    public decimal TotalPoints { get; set; }
+    public decimal TotalRegularPoints { get; set; }
+    public decimal TotalBoosterPoints { get; set; }
+    public decimal TotalRedeemPoints { get; set; }
+    public decimal TotalRejectedPoints { get; set; }
+    public decimal TotalBalancePoints { get; set; }
     public Dictionary<string, string?> CustomFields { get; set; } = [];
 }
 
@@ -64,4 +70,9 @@ public sealed class CustomerListFilterDto
     public ulong? StateId { get; set; }
     public ulong? CityId { get; set; }
     public ulong? PincodeId { get; set; }
+}
+
+public sealed class CustomerKycApprovalRequestDto
+{
+    public string? Remark { get; set; }
 }

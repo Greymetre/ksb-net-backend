@@ -41,6 +41,14 @@ public sealed class CustomerService : ICustomerService
         "pan_attachment", "aadhar_attachment", "bank_account_number", "ifsc_code", "bank_proof", "shop_photo", "gps_location"
     };
 
+    private static readonly HashSet<string> KycDocumentKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "gst",
+        "pan",
+        "aadhar",
+        "bank"
+    };
+
     private readonly ICustomerRepository _repository;
 
     public CustomerService(ICustomerRepository repository)
@@ -70,6 +78,24 @@ public sealed class CustomerService : ICustomerService
         var customer = await _repository.UpdateCustomerAsync(id, request, actorUserId, cancellationToken);
         if (customer is not null) await _repository.EnsureDistributorLoginUserAsync(customer.Id, actorUserId, cancellationToken);
         return LaravelApiResponse.Success("customer", customer ?? throw NotFound("Customer not found"), "Customer updated successfully");
+    }
+
+    public async Task<LaravelApiResponse> ApproveKycDocumentAsync(ulong id, string documentKey, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw new LaravelHttpException(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var key = NormalizeKycDocumentKey(documentKey);
+        var customer = await _repository.UpdateKycStatusAsync(id, key, "approved", remark, actorUserId.Value, cancellationToken);
+        return LaravelApiResponse.Success("customer", customer ?? throw NotFound("Customer not found"), "KYC document approved successfully");
+    }
+
+    public async Task<LaravelApiResponse> RejectKycDocumentAsync(ulong id, string documentKey, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw new LaravelHttpException(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        if (string.IsNullOrWhiteSpace(remark)) throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, "Remark is required.");
+
+        var key = NormalizeKycDocumentKey(documentKey);
+        var customer = await _repository.UpdateKycStatusAsync(id, key, "rejected", remark, actorUserId.Value, cancellationToken);
+        return LaravelApiResponse.Success("customer", customer ?? throw NotFound("Customer not found"), "KYC document rejected successfully");
     }
 
     public async Task<LaravelApiResponse> SetCustomerActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken)
@@ -219,6 +245,17 @@ public sealed class CustomerService : ICustomerService
     private static string? Field(CustomerDto customer, string key) =>
         customer.CustomFields.TryGetValue(key, out var value) ? value : null;
 
+    private static string NormalizeKycDocumentKey(string documentKey)
+    {
+        var key = NormalizeText(documentKey)?.ToLowerInvariant();
+        if (key is null || !KycDocumentKeys.Contains(key))
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Invalid KYC document.");
+        }
+
+        return key;
+    }
+
     private static string? FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
@@ -237,6 +274,8 @@ public sealed class CustomerService : ICustomerService
     {
         using var workbook = new XLWorkbook();
         var worksheet = workbook.AddWorksheet("Sheet1");
+        worksheet.Style.Font.FontName = "Calibri";
+        worksheet.Style.Font.FontSize = 9;
         for (var column = 0; column < headings.Length; column++)
         {
             worksheet.Cell(1, column + 1).Value = TitleCaseHeading(headings[column]);

@@ -387,6 +387,8 @@ public sealed class UserService : IUserService
     {
         using var workbook = new XLWorkbook();
         var worksheet = workbook.AddWorksheet("Sheet1");
+        worksheet.Style.Font.FontName = "Calibri";
+        worksheet.Style.Font.FontSize = 9;
 
         for (var column = 0; column < headings.Length; column++)
         {

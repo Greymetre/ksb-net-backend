@@ -38,6 +38,7 @@ public sealed class AppDbContext : DbContext
     public DbSet<ProductDetail> ProductDetails => Set<ProductDetail>();
     public DbSet<LoyaltyScheme> LoyaltySchemes => Set<LoyaltyScheme>();
     public DbSet<LoyaltySchemeSlab> LoyaltySchemeSlabs => Set<LoyaltySchemeSlab>();
+    public DbSet<LoyaltyRedemption> LoyaltyRedemptions => Set<LoyaltyRedemption>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

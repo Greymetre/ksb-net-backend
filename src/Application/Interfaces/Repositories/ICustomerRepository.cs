@@ -8,6 +8,7 @@ public interface ICustomerRepository
     Task<CustomerDto?> GetCustomerAsync(ulong id, CancellationToken cancellationToken);
     Task<CustomerDto> CreateCustomerAsync(CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<CustomerDto?> UpdateCustomerAsync(ulong id, CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
+    Task<CustomerDto?> UpdateKycStatusAsync(ulong id, string documentKey, string status, string? remark, ulong actorUserId, CancellationToken cancellationToken);
     Task<CustomerDto?> SetCustomerActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken);
     Task<bool> DeleteCustomerAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken);
     Task EnsureDistributorLoginUserAsync(ulong customerId, ulong? actorUserId, CancellationToken cancellationToken);

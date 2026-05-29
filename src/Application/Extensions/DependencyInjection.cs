@@ -15,6 +15,7 @@ public static class DependencyInjection
         services.AddScoped<ICustomerService, CustomerService>();
         services.AddScoped<ILoyaltySchemeService, LoyaltySchemeService>();
         services.AddScoped<INewInvoiceService, NewInvoiceService>();
+        services.AddScoped<IRedemptionService, RedemptionService>();
         services.AddScoped<IProductService, ProductService>();
         services.AddScoped<IRoleService, RoleService>();
         services.AddScoped<IUserService, UserService>();

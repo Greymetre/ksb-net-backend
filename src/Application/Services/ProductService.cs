@@ -219,6 +219,8 @@ public sealed class ProductService : IProductService
     {
         using var workbook = new XLWorkbook();
         var worksheet = workbook.AddWorksheet("Sheet1");
+        worksheet.Style.Font.FontName = "Calibri";
+        worksheet.Style.Font.FontSize = 9;
         for (var i = 0; i < headings.Length; i++)
         {
             worksheet.Cell(1, i + 1).Value = TitleCaseHeading(headings[i]);
