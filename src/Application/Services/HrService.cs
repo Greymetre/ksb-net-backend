@@ -12,8 +12,8 @@ namespace Application.Services;
 
 public sealed class HrService : IHrService
 {
-    private static readonly string[] LeaveTypes = ["First Half Leave", "Second Half Leave", "Full Day Leave", "Leave"];
-    private static readonly string[] BalanceTypes = ["Earned Leave", "Casual Leave", "Sick Leave", "Comp-off Balance", "Compoff Balance"];
+    private static readonly string[] LeaveTypes = ["First Half Leave", "Second Half Leave", "Full Day Leave"];
+    private static readonly string[] BalanceTypes = ["Casual Leave"];
     private readonly IHrRepository _repository;
 
     public HrService(IHrRepository repository)
@@ -51,14 +51,18 @@ public sealed class HrService : IHrService
     {
         var names = request.Names ?? request.Name ?? [];
         var dates = request.HolidayDates ?? request.HolidayDate ?? [];
-        if (request.Branch is null or 0) throw BadRequest("Branch is required.");
+        var holidayFor = NormalizeHolidayFor(request.HolidayFor);
+        if (holidayFor == "branch" && request.Branch is null or 0) throw BadRequest("Branch is required.");
+        if (holidayFor == "division" && request.DivisionId is null or 0) throw BadRequest("Division is required.");
         if (dates.Length == 0 || names.Length == 0) throw BadRequest("Holiday name and date are required.");
 
         var now = DateTime.UtcNow;
         var holiday = new Holiday
         {
             Active = request.Active,
-            Branch = request.Branch,
+            HolidayFor = holidayFor,
+            Branch = holidayFor == "branch" ? request.Branch : null,
+            DivisionId = holidayFor == "division" ? request.DivisionId : null,
             Name = string.Join(",", names.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim())),
             HolidayDate = string.Join(",", dates.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => DateOnly.Parse(x, CultureInfo.InvariantCulture).ToString("yyyy-MM-dd"))),
             CreatedBy = actorUserId,
@@ -75,11 +79,15 @@ public sealed class HrService : IHrService
         var holiday = await _repository.GetHolidayEntityAsync(id, cancellationToken) ?? throw NotFound("Holiday not found");
         var names = request.Names ?? request.Name ?? [];
         var dates = request.HolidayDates ?? request.HolidayDate ?? [];
-        if (request.Branch is null or 0) throw BadRequest("Branch is required.");
+        var holidayFor = NormalizeHolidayFor(request.HolidayFor);
+        if (holidayFor == "branch" && request.Branch is null or 0) throw BadRequest("Branch is required.");
+        if (holidayFor == "division" && request.DivisionId is null or 0) throw BadRequest("Division is required.");
         if (dates.Length == 0 || names.Length == 0) throw BadRequest("Holiday name and date are required.");
 
         holiday.Active = request.Active;
-        holiday.Branch = request.Branch;
+        holiday.HolidayFor = holidayFor;
+        holiday.Branch = holidayFor == "branch" ? request.Branch : null;
+        holiday.DivisionId = holidayFor == "division" ? request.DivisionId : null;
         holiday.Name = string.Join(",", names.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => x.Trim()));
         holiday.HolidayDate = string.Join(",", dates.Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => DateOnly.Parse(x, CultureInfo.InvariantCulture).ToString("yyyy-MM-dd")));
         holiday.UpdatedBy = actorUserId;
@@ -98,8 +106,8 @@ public sealed class HrService : IHrService
     public async Task<HrFileDto> ExportHolidaysAsync(HolidayListFilterDto filter, CancellationToken cancellationToken)
     {
         var rows = await _repository.GetHolidaysAsync(filter, cancellationToken);
-        return Workbook("holidays.xlsx", ["id", "branch", "holiday_names", "holiday_dates", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.BranchName, x.Name, x.HolidayDate, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+        return Workbook("holidays.xlsx", ["id", "holiday_for", "branch", "division", "holiday_names", "holiday_dates", "active", "created_by", "created_at"],
+            rows.Select(x => new object?[] { x.Id, x.HolidayFor, x.BranchName, x.DivisionName, x.Name, x.HolidayDate, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetLeavesAsync(LeaveListFilterDto filter, CancellationToken cancellationToken) =>
@@ -469,8 +477,12 @@ public sealed class HrService : IHrService
             .ToDictionary(x => x.Key, x => x.First());
         var holidays = await _repository.GetActiveHolidaysAsync(cancellationToken);
         var holidayByBranch = holidays
-            .Where(x => x.Branch.HasValue)
+            .Where(x => x.HolidayFor == "branch" && x.Branch.HasValue)
             .GroupBy(x => x.Branch!.Value)
+            .ToDictionary(x => x.Key, x => x.SelectMany(h => SplitCsv(h.HolidayDate)).ToHashSet(StringComparer.OrdinalIgnoreCase));
+        var holidayByDivision = holidays
+            .Where(x => x.HolidayFor == "division" && x.DivisionId.HasValue)
+            .GroupBy(x => x.DivisionId!.Value)
             .ToDictionary(x => x.Key, x => x.SelectMany(h => SplitCsv(h.HolidayDate)).ToHashSet(StringComparer.OrdinalIgnoreCase));
 
         return users.Select(user =>
@@ -484,7 +496,7 @@ public sealed class HrService : IHrService
             foreach (var date in EachDate(start, end))
             {
                 var key = date.ToString("d-MMM-yyyy", CultureInfo.InvariantCulture);
-                var label = SummaryLabel(user, date, attendances.TryGetValue((user.Id, date), out var att) ? att : null, holidayByBranch);
+                var label = SummaryLabel(user, date, attendances.TryGetValue((user.Id, date), out var att) ? att : null, holidayByBranch, holidayByDivision);
                 days[key] = label;
                 if (label == "W/o") weekOff++;
                 else if (label == "A" || label == "MIS") absent++;
@@ -510,10 +522,12 @@ public sealed class HrService : IHrService
         }).ToList();
     }
 
-    private static string SummaryLabel(User user, DateTime date, Attendance? attendance, IReadOnlyDictionary<ulong, HashSet<string>> holidayByBranch)
+    private static string SummaryLabel(User user, DateTime date, Attendance? attendance, IReadOnlyDictionary<ulong, HashSet<string>> holidayByBranch, IReadOnlyDictionary<ulong, HashSet<string>> holidayByDivision)
     {
+        var holidayDate = date.ToString("yyyy-MM-dd");
         var branchId = user.PrimaryBranchId ?? ParseFirstUlong(user.BranchId);
-        if (branchId.HasValue && holidayByBranch.TryGetValue(branchId.Value, out var holidayDates) && holidayDates.Contains(date.ToString("yyyy-MM-dd"))) return "H";
+        if (branchId.HasValue && holidayByBranch.TryGetValue(branchId.Value, out var holidayDates) && holidayDates.Contains(holidayDate)) return "H";
+        if (user.DivisionId.HasValue && holidayByDivision.TryGetValue(user.DivisionId.Value, out var divisionHolidayDates) && divisionHolidayDates.Contains(holidayDate)) return "H";
         if (attendance is null)
         {
             if (user.DateOfJoining.HasValue && user.DateOfJoining.Value.Date > date.Date) return "-";
@@ -684,6 +698,11 @@ public sealed class HrService : IHrService
         if (string.IsNullOrWhiteSpace(value) || !allowed.Contains(value)) throw BadRequest(message);
         return value;
     }
+
+    private static string NormalizeHolidayFor(string? value) =>
+        string.Equals(value, "division", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "zone", StringComparison.OrdinalIgnoreCase)
+            ? "division"
+            : "branch";
 
     private static LaravelHttpException BadRequest(string message) => new(LaravelStatusCodes.BadRequest, message);
     private static LaravelHttpException NotFound(string message) => new(LaravelStatusCodes.NotFound, message);

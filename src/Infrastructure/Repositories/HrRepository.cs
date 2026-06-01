@@ -65,15 +65,25 @@ public sealed class HrRepository : IHrRepository
         var query = from h in _db.Holidays.AsNoTracking()
                     join branch in _db.Branches.AsNoTracking() on h.Branch equals branch.Id into branches
                     from branch in branches.DefaultIfEmpty()
+                    join division in _db.Divisions.AsNoTracking() on h.DivisionId equals division.Id into divisions
+                    from division in divisions.DefaultIfEmpty()
                     join creator in _db.Users.AsNoTracking() on h.CreatedBy equals creator.Id into creators
                     from creator in creators.DefaultIfEmpty()
-                    select new { h, branch, creator };
+                    select new { h, branch, division, creator };
 
-        if (filter.BranchId.HasValue) query = query.Where(x => x.h.Branch == filter.BranchId);
+        if (!string.IsNullOrWhiteSpace(filter.HolidayFor))
+        {
+            var holidayFor = string.Equals(filter.HolidayFor, "division", StringComparison.OrdinalIgnoreCase) || string.Equals(filter.HolidayFor, "zone", StringComparison.OrdinalIgnoreCase)
+                ? "division"
+                : "branch";
+            query = query.Where(x => x.h.HolidayFor == holidayFor);
+        }
+        if (filter.BranchId.HasValue) query = query.Where(x => x.h.HolidayFor == "branch" && x.h.Branch == filter.BranchId);
+        if (filter.DivisionId.HasValue) query = query.Where(x => x.h.HolidayFor == "division" && x.h.DivisionId == filter.DivisionId);
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var search = filter.Search.Trim();
-            query = query.Where(x => (x.h.Name ?? "").Contains(search) || (x.h.HolidayDate ?? "").Contains(search) || (x.branch.BranchName ?? "").Contains(search));
+            query = query.Where(x => (x.h.Name ?? "").Contains(search) || (x.h.HolidayDate ?? "").Contains(search) || (x.branch.BranchName ?? "").Contains(search) || (x.division.DivisionName ?? "").Contains(search));
         }
 
         return await query.OrderByDescending(x => x.h.Id)
@@ -83,6 +93,9 @@ public sealed class HrRepository : IHrRepository
                 Active = x.h.Active,
                 Branch = x.h.Branch,
                 BranchName = x.branch.BranchName,
+                HolidayFor = x.h.HolidayFor,
+                DivisionId = x.h.DivisionId,
+                DivisionName = x.division.DivisionName,
                 Name = x.h.Name,
                 HolidayDate = x.h.HolidayDate,
                 Names = SplitCsv(x.h.Name),

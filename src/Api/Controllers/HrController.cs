@@ -34,8 +34,8 @@ public sealed class HrController : ControllerBase
     [RequirePermission("holiday_access")]
     [HttpGet("holidays")]
     [HttpGet("holiday")]
-    public async Task<IActionResult> Holidays([FromQuery] string? search, [FromQuery(Name = "branch_id")] ulong? branchId, CancellationToken cancellationToken) =>
-        Ok(await _hrService.GetHolidaysAsync(new HolidayListFilterDto { Search = search, BranchId = branchId }, cancellationToken));
+    public async Task<IActionResult> Holidays([FromQuery] string? search, [FromQuery(Name = "holiday_for")] string? holidayFor, [FromQuery(Name = "branch_id")] ulong? branchId, [FromQuery(Name = "division_id")] ulong? divisionId, CancellationToken cancellationToken) =>
+        Ok(await _hrService.GetHolidaysAsync(new HolidayListFilterDto { Search = search, HolidayFor = holidayFor, BranchId = branchId, DivisionId = divisionId }, cancellationToken));
 
     [RequirePermission("holiday_access")]
     [HttpGet("holidays/{id}")]
@@ -65,9 +65,9 @@ public sealed class HrController : ControllerBase
 
     [RequirePermission("holiday_access")]
     [HttpGet("holidays/export")]
-    public async Task<IActionResult> ExportHolidays([FromQuery] string? search, [FromQuery(Name = "branch_id")] ulong? branchId, CancellationToken cancellationToken)
+    public async Task<IActionResult> ExportHolidays([FromQuery] string? search, [FromQuery(Name = "holiday_for")] string? holidayFor, [FromQuery(Name = "branch_id")] ulong? branchId, [FromQuery(Name = "division_id")] ulong? divisionId, CancellationToken cancellationToken)
     {
-        var file = await _hrService.ExportHolidaysAsync(new HolidayListFilterDto { Search = search, BranchId = branchId }, cancellationToken);
+        var file = await _hrService.ExportHolidaysAsync(new HolidayListFilterDto { Search = search, HolidayFor = holidayFor, BranchId = branchId, DivisionId = divisionId }, cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 

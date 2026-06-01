@@ -16,7 +16,9 @@ public sealed class HrLookupDto
 public sealed class HolidayListFilterDto
 {
     public string? Search { get; init; }
+    public string? HolidayFor { get; init; }
     public ulong? BranchId { get; init; }
+    public ulong? DivisionId { get; init; }
 }
 
 public sealed class HolidayDto
@@ -25,6 +27,9 @@ public sealed class HolidayDto
     public string Active { get; init; } = "Y";
     public ulong? Branch { get; init; }
     public string? BranchName { get; init; }
+    public string HolidayFor { get; init; } = "branch";
+    public ulong? DivisionId { get; init; }
+    public string? DivisionName { get; init; }
     public string? Name { get; init; }
     public string? HolidayDate { get; init; }
     public string[] Names { get; init; } = [];
@@ -38,6 +43,8 @@ public sealed class HolidayRequestDto
 {
     public string Active { get; init; } = "Y";
     public ulong? Branch { get; init; }
+    public string? HolidayFor { get; init; }
+    public ulong? DivisionId { get; init; }
     public string[]? Name { get; init; }
     public string[]? HolidayDate { get; init; }
     public string[]? Names { get; init; }

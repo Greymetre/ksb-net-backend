@@ -15,6 +15,8 @@ public sealed class HolidayConfiguration : IEntityTypeConfiguration<Holiday>
         builder.Property(x => x.Name).HasColumnName("name").HasColumnType("longtext");
         builder.Property(x => x.HolidayDate).HasColumnName("holiday_date").HasColumnType("longtext");
         builder.Property(x => x.Branch).HasColumnName("branch");
+        builder.Property(x => x.HolidayFor).HasColumnName("holiday_for").HasMaxLength(20).HasDefaultValue("branch");
+        builder.Property(x => x.DivisionId).HasColumnName("division_id");
         builder.Property(x => x.CreatedBy).HasColumnName("created_by");
         builder.Property(x => x.UpdatedBy).HasColumnName("updated_by");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");
