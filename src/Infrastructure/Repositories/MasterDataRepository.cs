@@ -8,7 +8,8 @@ namespace Infrastructure.Repositories;
 
 public sealed class MasterDataRepository : IMasterDataRepository
 {
-    private const int MaxRows = 500;
+    private const int MaxRows = 50000;
+    private const int MaxCityRows = 50000;
     private readonly AppDbContext _dbContext;
 
     public MasterDataRepository(AppDbContext dbContext)
@@ -339,7 +340,7 @@ public sealed class MasterDataRepository : IMasterDataRepository
 
         return await query
             .OrderByDescending(x => x.Id)
-            .Take(MaxRows)
+            .Take(MaxCityRows)
             .Select(x => new CityDto
             {
                 Id = x.Id,

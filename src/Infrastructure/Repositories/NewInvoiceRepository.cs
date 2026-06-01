@@ -10,7 +10,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class NewInvoiceRepository : INewInvoiceRepository
 {
-    private const int MaxRows = 1000;
+    private const int MaxRows = 50000;
     private const ulong RetailerCustomerType = 2;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _dbContext;

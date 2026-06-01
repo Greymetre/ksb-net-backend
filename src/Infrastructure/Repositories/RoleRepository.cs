@@ -9,7 +9,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class RoleRepository : IRoleRepository
 {
-    private const int MaxRows = 1000;
+    private const int MaxRows = 50000;
     private readonly AppDbContext _dbContext;
 
     public RoleRepository(AppDbContext dbContext)

@@ -10,7 +10,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class CustomerRepository : ICustomerRepository
 {
-    private const int MaxRows = 1000;
+    private const int MaxRows = 50000;
     private const ulong DistributorCustomerType = 1;
     private const string DistributorRoleName = "Distributor";
     private const string GuardName = "users";

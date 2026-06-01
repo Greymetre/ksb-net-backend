@@ -8,7 +8,7 @@ namespace Infrastructure.Repositories;
 
 public sealed class ProductRepository : IProductRepository
 {
-    private const int MaxRows = 1000;
+    private const int MaxRows = 50000;
     private readonly AppDbContext _dbContext;
 
     public ProductRepository(AppDbContext dbContext)

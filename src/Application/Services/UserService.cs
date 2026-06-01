@@ -54,6 +54,7 @@ public sealed class UserService : IUserService
 
     public async Task<LaravelApiResponse> CreateUserAsync(UserRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        request = NormalizeRequest(request);
         await ValidateUserAsync(request, null, cancellationToken);
 
         var (firstName, lastName, name) = ResolveName(request);
@@ -100,6 +101,11 @@ public sealed class UserService : IUserService
             await _repository.SyncUserRolesAsync(user.Id, request.Roles, cancellationToken);
         }
 
+        if (request.CityIds is not null)
+        {
+            await _repository.SyncUserCityAssignmentsAsync(user.Id, request.CityIds, user.ReportingId, cancellationToken);
+        }
+
         await _repository.AddUserDetailsAsync(new UserDetails
         {
             UserId = user.Id,
@@ -114,6 +120,7 @@ public sealed class UserService : IUserService
 
     public async Task<LaravelApiResponse> UpdateUserAsync(ulong id, UserRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        request = NormalizeRequest(request);
         var user = await _repository.GetUserAsync(id, cancellationToken) ?? throw NotFound("User not found");
         await ValidateUserAsync(request, id, cancellationToken);
 
@@ -150,6 +157,11 @@ public sealed class UserService : IUserService
         if (request.Roles is not null)
         {
             await _repository.SyncUserRolesAsync(user.Id, request.Roles, cancellationToken);
+        }
+
+        if (request.CityIds is not null)
+        {
+            await _repository.SyncUserCityAssignmentsAsync(user.Id, request.CityIds, user.ReportingId, cancellationToken);
         }
 
         var details = await _repository.GetUserDetailsAsync(user.Id, cancellationToken);
@@ -574,6 +586,34 @@ public sealed class UserService : IUserService
         }
 
         return request.BranchId;
+    }
+
+    private static UserRequestDto NormalizeRequest(UserRequestDto request)
+    {
+        request.Active ??= request.StringAlias("active");
+        request.Name ??= request.StringAlias("name");
+        request.FirstName ??= request.StringAlias("firstName");
+        request.LastName ??= request.StringAlias("lastName");
+        request.EmployeeCodes ??= request.StringAlias("employeeCodes");
+        request.Mobile ??= request.StringAlias("mobile");
+        request.Email ??= request.StringAlias("email");
+        request.Password ??= request.StringAlias("password");
+        request.BranchId ??= request.StringAlias("branchId");
+        request.BranchIds ??= request.ULongListAlias("branchIds");
+        request.DesignationId ??= request.ULongAlias("designationId");
+        request.DivisionId ??= request.ULongAlias("divisionId");
+        request.DepartmentId ??= request.ULongAlias("departmentId");
+        request.ReportingId ??= request.ULongAlias("reportingId", "reportingid");
+        request.Location ??= request.StringAlias("location");
+        request.BaseLocationCoordinates ??= request.StringAlias("baseLocationCoordinates");
+        request.Payroll ??= request.StringAlias("payroll");
+        request.WarehouseId ??= request.ULongAlias("warehouseId");
+        request.SalesType ??= request.StringAlias("salesType");
+        request.ShowAttandanceReport ??= request.StringAlias("showAttandanceReport");
+        request.DateOfJoining ??= request.DateAlias("dateOfJoining");
+        request.Roles ??= request.ULongListAlias("roles");
+        request.CityIds ??= request.ULongListAlias("cityIds");
+        return request;
     }
 
     private static LaravelHttpException NotFound(string message) =>

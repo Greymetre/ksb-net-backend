@@ -1,3 +1,7 @@
+using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Application.DTOs.Users;
 
 public sealed class UserExportFiltersDto
@@ -56,6 +60,7 @@ public sealed class UserDto
     public string? PasswordString { get; set; }
     public DateTime? CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
+    public IReadOnlyCollection<ulong> CityIds { get; set; } = [];
     public IReadOnlyCollection<UserRoleDto> Roles { get; set; } = [];
 }
 
@@ -83,6 +88,111 @@ public sealed class UserRequestDto
     public string? ShowAttandanceReport { get; set; }
     public DateTime? DateOfJoining { get; set; }
     public IReadOnlyCollection<ulong>? Roles { get; set; }
+    public IReadOnlyCollection<ulong>? CityIds { get; set; }
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+
+    public string? StringAlias(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (Extra?.TryGetValue(key, out var value) != true) continue;
+            var text = ReadString(value);
+            if (text is not null) return text;
+        }
+
+        return null;
+    }
+
+    public ulong? ULongAlias(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (Extra?.TryGetValue(key, out var value) != true) continue;
+            var number = ReadULong(value);
+            if (number.HasValue) return number;
+        }
+
+        return null;
+    }
+
+    public IReadOnlyCollection<ulong>? ULongListAlias(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (Extra?.TryGetValue(key, out var value) != true) continue;
+            var list = ReadULongList(value);
+            if (list is not null) return list;
+        }
+
+        return null;
+    }
+
+    public DateTime? DateAlias(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (Extra?.TryGetValue(key, out var value) != true) continue;
+            var date = ReadDate(value);
+            if (date.HasValue) return date;
+        }
+
+        return null;
+    }
+
+    private static string? ReadString(JsonElement value) =>
+        value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString(),
+            JsonValueKind.Number => value.GetRawText(),
+            JsonValueKind.True => "1",
+            JsonValueKind.False => "0",
+            _ => null
+        };
+
+    private static ulong? ReadULong(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Number && value.TryGetUInt64(out var number)) return number;
+        if (value.ValueKind == JsonValueKind.String && ulong.TryParse(value.GetString(), out number)) return number;
+        return null;
+    }
+
+    private static IReadOnlyCollection<ulong>? ReadULongList(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.Array)
+        {
+            return value.EnumerateArray()
+                .Select(ReadULong)
+                .Where(x => x.HasValue)
+                .Select(x => x!.Value)
+                .Distinct()
+                .ToArray();
+        }
+
+        var text = ReadString(value);
+        if (string.IsNullOrWhiteSpace(text)) return [];
+        return text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(part => ulong.TryParse(part, out var parsed) ? parsed : (ulong?)null)
+            .Where(x => x.HasValue)
+            .Select(x => x!.Value)
+            .Distinct()
+            .ToArray();
+    }
+
+    private static DateTime? ReadDate(JsonElement value)
+    {
+        if (value.ValueKind == JsonValueKind.String)
+        {
+            var text = value.GetString();
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            return DateTime.TryParse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var parsed)
+                ? parsed
+                : null;
+        }
+
+        return value.ValueKind == JsonValueKind.Null ? null : null;
+    }
 }
 
 public sealed class UserOptionsDto
@@ -93,6 +203,7 @@ public sealed class UserOptionsDto
     public IReadOnlyCollection<OptionDto> Divisions { get; set; } = [];
     public IReadOnlyCollection<OptionDto> Departments { get; set; } = [];
     public IReadOnlyCollection<OptionDto> Reportings { get; set; } = [];
+    public IReadOnlyCollection<OptionDto> Cities { get; set; } = [];
 }
 
 public sealed class OptionDto

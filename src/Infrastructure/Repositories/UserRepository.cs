@@ -10,7 +10,7 @@ namespace Infrastructure.Repositories;
 public sealed class UserRepository : IUserRepository
 {
     private const string DistributorRoleName = "Distributor";
-    private const int MaxRows = 1000;
+    private const int MaxRows = 50000;
     private readonly AppDbContext _dbContext;
 
     public UserRepository(AppDbContext dbContext)
@@ -91,6 +91,13 @@ public sealed class UserRepository : IUserRepository
             .Select(x => new OptionDto { Id = x.Id, Name = x.Name })
             .ToListAsync(cancellationToken);
 
+        var cities = await _dbContext.Cities.AsNoTracking()
+            .Where(x => x.Active == "Y" && x.DeletedAt == null)
+            .OrderBy(x => x.CityName)
+            .Take(MaxRows)
+            .Select(x => new OptionDto { Id = x.Id, Name = x.CityName })
+            .ToListAsync(cancellationToken);
+
         return new UserOptionsDto
         {
             Roles = roles,
@@ -98,7 +105,8 @@ public sealed class UserRepository : IUserRepository
             Designations = designations,
             Divisions = divisions,
             Departments = departments,
-            Reportings = reportings
+            Reportings = reportings,
+            Cities = cities
         };
     }
 
@@ -224,6 +232,24 @@ public sealed class UserRepository : IUserRepository
         }), cancellationToken);
     }
 
+    public async Task SyncUserCityAssignmentsAsync(ulong userId, IEnumerable<ulong> cityIds, ulong? reportingId, CancellationToken cancellationToken)
+    {
+        var currentAssignments = _dbContext.UserCityAssigns.Where(x => x.UserId == userId);
+        _dbContext.UserCityAssigns.RemoveRange(currentAssignments);
+
+        await _dbContext.UserCityAssigns.AddRangeAsync(cityIds
+            .Where(cityId => cityId > 0)
+            .Distinct()
+            .Select(cityId => new UserCityAssign
+            {
+                UserId = userId,
+                ReportingId = reportingId,
+                CityId = cityId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            }), cancellationToken);
+    }
+
     public async Task<bool> DeleteUserAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
     {
         var user = await _dbContext.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
@@ -304,6 +330,10 @@ public sealed class UserRepository : IUserRepository
             .ToListAsync(cancellationToken);
 
         var userIds = users.Select(x => x.user.Id).ToArray();
+        var cityAssignments = await _dbContext.UserCityAssigns.AsNoTracking()
+            .Where(x => userIds.Contains(x.UserId) && x.CityId.HasValue)
+            .Select(x => new { x.UserId, CityId = x.CityId!.Value })
+            .ToListAsync(cancellationToken);
         var roles = await (
             from modelRole in _dbContext.ModelHasRoles.AsNoTracking()
             join role in _dbContext.Roles.AsNoTracking() on modelRole.RoleId equals role.Id
@@ -346,6 +376,11 @@ public sealed class UserRepository : IUserRepository
             PasswordString = row.user.PasswordString,
             CreatedAt = row.user.CreatedAt,
             UpdatedAt = row.user.UpdatedAt,
+            CityIds = cityAssignments
+                .Where(x => x.UserId == row.user.Id)
+                .Select(x => x.CityId)
+                .Distinct()
+                .ToArray(),
             Roles = roles
                 .Where(x => x.ModelId == row.user.Id)
                 .Select(x => new UserRoleDto { Id = x.Id, Name = x.Name })

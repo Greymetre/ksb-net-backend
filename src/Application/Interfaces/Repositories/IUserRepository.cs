@@ -18,6 +18,7 @@ public interface IUserRepository
     Task AddUserDetailsAsync(UserDetails userDetails, CancellationToken cancellationToken);
     Task AddUserEducationAsync(UserEducation userEducation, CancellationToken cancellationToken);
     Task SyncUserRolesAsync(ulong userId, IEnumerable<ulong> roleIds, CancellationToken cancellationToken);
+    Task SyncUserCityAssignmentsAsync(ulong userId, IEnumerable<ulong> cityIds, ulong? reportingId, CancellationToken cancellationToken);
     Task<bool> DeleteUserAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

@@ -39,6 +39,15 @@ public sealed class AppDbContext : DbContext
     public DbSet<LoyaltyScheme> LoyaltySchemes => Set<LoyaltyScheme>();
     public DbSet<LoyaltySchemeSlab> LoyaltySchemeSlabs => Set<LoyaltySchemeSlab>();
     public DbSet<LoyaltyRedemption> LoyaltyRedemptions => Set<LoyaltyRedemption>();
+    public DbSet<Holiday> Holidays => Set<Holiday>();
+    public DbSet<Leave> Leaves => Set<Leave>();
+    public DbSet<CompOffLeave> CompOffLeaves => Set<CompOffLeave>();
+    public DbSet<TourProgramme> TourProgrammes => Set<TourProgramme>();
+    public DbSet<TourDetail> TourDetails => Set<TourDetail>();
+    public DbSet<TourLog> TourLogs => Set<TourLog>();
+    public DbSet<Attendance> Attendances => Set<Attendance>();
+    public DbSet<Beat> Beats => Set<Beat>();
+    public DbSet<BeatSchedule> BeatSchedules => Set<BeatSchedule>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
