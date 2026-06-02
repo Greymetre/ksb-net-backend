@@ -48,6 +48,13 @@ public sealed class AppDbContext : DbContext
     public DbSet<Attendance> Attendances => Set<Attendance>();
     public DbSet<Beat> Beats => Set<Beat>();
     public DbSet<BeatSchedule> BeatSchedules => Set<BeatSchedule>();
+    public DbSet<SalesTargetUser> SalesTargetUsers => Set<SalesTargetUser>();
+    public DbSet<PrimarySale> PrimarySales => Set<PrimarySale>();
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<ExpenseType> ExpenseTypes => Set<ExpenseType>();
+    public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<ExpenseLog> ExpenseLogs => Set<ExpenseLog>();
+    public DbSet<Media> Media => Set<Media>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
