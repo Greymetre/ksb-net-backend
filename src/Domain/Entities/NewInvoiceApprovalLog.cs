@@ -8,5 +8,6 @@ public sealed class NewInvoiceApprovalLog : BaseEntity
     public string? StatusType { get; set; }
     public int? FromStatus { get; set; }
     public int? ToStatus { get; set; }
+    public decimal? ApprovedAmount { get; set; }
     public string? Remark { get; set; }
 }

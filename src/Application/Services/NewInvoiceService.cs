@@ -34,7 +34,7 @@ public sealed class NewInvoiceService : INewInvoiceService
     {
         var invoices = await _repository.GetInvoicesAsync(filter, actorUserId, cancellationToken);
         return CreateWorkbook("new-invoices.xlsx",
-            ["retailer_id", "customer", "shop", "mobile", "assigned_distributor", "assigned_employee", "city", "zone", "invoice_date", "invoice_number", "amount", "scheme_name", "points", "scheme_hint", "attachment", "status", "created_by", "created_at"],
+            ["retailer_id", "customer", "shop", "mobile", "assigned_distributor", "assigned_employee", "city", "zone", "invoice_date", "invoice_number", "amount", "ss_approved_amount", "ss_remark", "sales_approved_amount", "sales_remark", "ho_approved_amount", "ho_remark", "scheme_name", "points", "scheme_hint", "attachment", "status", "created_by", "created_at"],
             invoices.Select(x => new object?[]
             {
                 x.RetailerCode,
@@ -48,6 +48,12 @@ public sealed class NewInvoiceService : INewInvoiceService
                 x.InvoiceDate,
                 x.InvoiceNumber,
                 x.Amount,
+                x.SsApprovedAmount,
+                x.SsApprovalRemark,
+                x.SalesApprovedAmount,
+                x.SalesApprovalRemark,
+                x.HoApprovedAmount,
+                x.HoApprovalRemark,
                 x.SchemeName,
                 x.SchemePoints,
                 x.SchemeHintMessage,
@@ -88,7 +94,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         var entity = await _repository.FindInvoiceEntityAsync(created.Id, cancellationToken);
         if (entity is not null)
         {
-            await _repository.SaveInvoiceAsync(entity, "generated", null, NewInvoice.StatusPending, actorUserId.Value, null, cancellationToken);
+            await _repository.SaveInvoiceAsync(entity, "generated", null, NewInvoice.StatusPending, actorUserId.Value, null, null, cancellationToken);
             created = await _repository.GetInvoiceAsync(created.Id, actorUserId, cancellationToken) ?? created;
         }
 
@@ -113,7 +119,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         invoice.Points = request.Points ?? 0;
         if (request.Attachment is not null) invoice.Attachment = NormalizeText(request.Attachment);
 
-        var updated = await _repository.SaveInvoiceAsync(invoice, "updated", invoice.ApprovalStatus, invoice.ApprovalStatus, actorUserId.Value, null, cancellationToken);
+        var updated = await _repository.SaveInvoiceAsync(invoice, "updated", invoice.ApprovalStatus, invoice.ApprovalStatus, actorUserId.Value, null, null, cancellationToken);
         return LaravelApiResponse.Success("new_invoice", updated, "Invoice updated successfully");
     }
 
@@ -124,7 +130,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         return LaravelApiResponse.MessageOnly("success", "Invoice deleted successfully");
     }
 
-    public async Task<LaravelApiResponse> ApproveInvoiceAsync(ulong id, string level, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
+    public async Task<LaravelApiResponse> ApproveInvoiceAsync(ulong id, string level, string? remark, decimal? approvedAmount, ulong? actorUserId, CancellationToken cancellationToken)
     {
         if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
         var invoice = await FindOrThrowAsync(id, cancellationToken);
@@ -140,6 +146,12 @@ public sealed class NewInvoiceService : INewInvoiceService
         if (!CanMoveToStatus(fromStatus, toStatus))
         {
             throw Http(LaravelStatusCodes.NoContentLikeValidation, "Invoice cannot move to the selected approval status.");
+        }
+
+        var finalApprovedAmount = approvedAmount ?? invoice.Amount;
+        if (finalApprovedAmount <= 0)
+        {
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, new { approved_amount = new[] { "Approved invoice amount must be greater than 0." } });
         }
 
         invoice.ApprovalStatus = toStatus;
@@ -161,7 +173,7 @@ public sealed class NewInvoiceService : INewInvoiceService
             invoice.ApprovedHoAt = now;
         }
 
-        var updated = await _repository.SaveInvoiceAsync(invoice, statusType, fromStatus, toStatus, actorUserId.Value, remark, cancellationToken);
+        var updated = await _repository.SaveInvoiceAsync(invoice, statusType, fromStatus, toStatus, actorUserId.Value, remark, finalApprovedAmount, cancellationToken);
         return LaravelApiResponse.Success("new_invoice", updated, "Invoice approved successfully.");
     }
 
@@ -182,7 +194,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         invoice.RejectedBy = actorUserId;
         invoice.RejectedAt = DateTime.UtcNow;
 
-        var updated = await _repository.SaveInvoiceAsync(invoice, "rejected", fromStatus, NewInvoice.StatusRejected, actorUserId.Value, remark, cancellationToken);
+        var updated = await _repository.SaveInvoiceAsync(invoice, "rejected", fromStatus, NewInvoice.StatusRejected, actorUserId.Value, remark, null, cancellationToken);
         return LaravelApiResponse.Success("new_invoice", updated, "Invoice rejected successfully.");
     }
 

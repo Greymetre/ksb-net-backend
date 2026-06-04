@@ -13,6 +13,6 @@ public interface INewInvoiceService
     Task<LaravelApiResponse> CreateInvoiceAsync(NewInvoiceRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> UpdateInvoiceAsync(ulong id, NewInvoiceRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> DeleteInvoiceAsync(ulong id, CancellationToken cancellationToken);
-    Task<LaravelApiResponse> ApproveInvoiceAsync(ulong id, string level, string? remark, ulong? actorUserId, CancellationToken cancellationToken);
+    Task<LaravelApiResponse> ApproveInvoiceAsync(ulong id, string level, string? remark, decimal? approvedAmount, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> RejectInvoiceAsync(ulong id, string? remark, ulong? actorUserId, CancellationToken cancellationToken);
 }

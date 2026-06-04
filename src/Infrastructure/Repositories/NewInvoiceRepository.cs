@@ -35,7 +35,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         var assignedEmployees = await LoadAssignedEmployeeNamesAsync(rows.Select(x => x.Customer), cancellationToken);
         var schemes = await LoadSchemesAsync(rows.Select(x => x.Invoice.InvoiceDate), cancellationToken);
         var schemeInvoices = await LoadSchemeInvoicesAsync(rows.Select(x => x.Customer.Id), schemes, cancellationToken);
-        return rows.SelectMany(x => ToSchemeDtos(x.Invoice, x.Customer, CityName(x.Customer, cities), AssignedZoneName(x.Customer, assignedZones) ?? x.Branch?.BranchName, AssignedDistributorName(x.Customer, assignedDistributors), AssignedEmployeeName(x.Customer, assignedEmployees), x.Creator, x.Branch, schemes, schemeInvoices)).ToList();
+        var approvals = await LoadApprovalStageSummariesAsync(rows.Select(x => x.Invoice.Id), cancellationToken);
+        return rows.SelectMany(x => ToSchemeDtos(x.Invoice, x.Customer, CityName(x.Customer, cities), AssignedZoneName(x.Customer, assignedZones) ?? x.Branch?.BranchName, AssignedDistributorName(x.Customer, assignedDistributors), AssignedEmployeeName(x.Customer, assignedEmployees), x.Creator, x.Branch, schemes, schemeInvoices, ApprovalSummary(x.Invoice.Id, approvals))).ToList();
     }
 
     public async Task<NewInvoiceDto?> GetInvoiceAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
@@ -50,7 +51,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         var assignedEmployees = await LoadAssignedEmployeeNamesAsync([row.Customer], cancellationToken);
         var schemes = await LoadSchemesAsync([row.Invoice.InvoiceDate], cancellationToken);
         var schemeInvoices = await LoadSchemeInvoicesAsync([row.Customer.Id], schemes, cancellationToken);
-        var dto = ToSchemeDtos(row.Invoice, row.Customer, CityName(row.Customer, cities), AssignedZoneName(row.Customer, assignedZones) ?? row.Branch?.BranchName, AssignedDistributorName(row.Customer, assignedDistributors), AssignedEmployeeName(row.Customer, assignedEmployees), row.Creator, row.Branch, schemes, schemeInvoices).First();
+        var approvals = await LoadApprovalStageSummariesAsync([row.Invoice.Id], cancellationToken);
+        var dto = ToSchemeDtos(row.Invoice, row.Customer, CityName(row.Customer, cities), AssignedZoneName(row.Customer, assignedZones) ?? row.Branch?.BranchName, AssignedDistributorName(row.Customer, assignedDistributors), AssignedEmployeeName(row.Customer, assignedEmployees), row.Creator, row.Branch, schemes, schemeInvoices, ApprovalSummary(row.Invoice.Id, approvals)).First();
         dto.ApprovalLogs = await GetApprovalLogsAsync(id, cancellationToken);
         return dto;
     }
@@ -109,7 +111,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     public async Task<NewInvoice?> FindInvoiceEntityAsync(ulong id, CancellationToken cancellationToken) =>
         await _dbContext.NewInvoices.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-    public async Task<NewInvoiceDto> SaveInvoiceAsync(NewInvoice invoice, string statusType, int? fromStatus, int toStatus, ulong actorUserId, string? remark, CancellationToken cancellationToken)
+    public async Task<NewInvoiceDto> SaveInvoiceAsync(NewInvoice invoice, string statusType, int? fromStatus, int toStatus, ulong actorUserId, string? remark, decimal? approvedAmount, CancellationToken cancellationToken)
     {
         invoice.UpdatedAt = DateTime.UtcNow;
         await _dbContext.NewInvoiceApprovalLogs.AddAsync(new NewInvoiceApprovalLog
@@ -120,6 +122,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             StatusType = statusType,
             FromStatus = fromStatus,
             ToStatus = toStatus,
+            ApprovedAmount = approvedAmount,
             Remark = remark,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -352,9 +355,58 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
                   StatusType = log.StatusType ?? string.Empty,
                   FromStatus = log.FromStatus,
                   ToStatus = log.ToStatus,
+                  ApprovedAmount = log.ApprovedAmount,
                   Remark = log.Remark,
                   CreatedAt = log.CreatedAt
               }).ToListAsync(cancellationToken);
+
+    private async Task<Dictionary<ulong, ApprovalStageSummary>> LoadApprovalStageSummariesAsync(IEnumerable<ulong> invoiceIds, CancellationToken cancellationToken)
+    {
+        var ids = invoiceIds.Distinct().ToArray();
+        if (ids.Length == 0) return [];
+
+        var logs = await _dbContext.NewInvoiceApprovalLogs.AsNoTracking()
+            .Where(x => x.NewInvoiceId.HasValue
+                && ids.Contains(x.NewInvoiceId.Value)
+                && x.ToStatus.HasValue
+                && x.ApprovedAmount.HasValue
+                && (x.ToStatus == NewInvoice.StatusApprovedSs
+                    || x.ToStatus == NewInvoice.StatusApprovedSales
+                    || x.ToStatus == NewInvoice.StatusApprovedHo))
+            .OrderByDescending(x => x.CreatedAt)
+            .ThenByDescending(x => x.Id)
+            .Select(x => new
+            {
+                InvoiceId = x.NewInvoiceId!.Value,
+                ToStatus = x.ToStatus!.Value,
+                x.ApprovedAmount,
+                x.Remark
+            })
+            .ToListAsync(cancellationToken);
+
+        var summaries = ids.ToDictionary(id => id, _ => new ApprovalStageSummary());
+        foreach (var log in logs)
+        {
+            var summary = summaries[log.InvoiceId];
+            if (log.ToStatus == NewInvoice.StatusApprovedSs && !summary.SsApprovedAmount.HasValue)
+            {
+                summary.SsApprovedAmount = log.ApprovedAmount;
+                summary.SsApprovalRemark = log.Remark;
+            }
+            if (log.ToStatus == NewInvoice.StatusApprovedSales && !summary.SalesApprovedAmount.HasValue)
+            {
+                summary.SalesApprovedAmount = log.ApprovedAmount;
+                summary.SalesApprovalRemark = log.Remark;
+            }
+            if (log.ToStatus == NewInvoice.StatusApprovedHo && !summary.HoApprovedAmount.HasValue)
+            {
+                summary.HoApprovedAmount = log.ApprovedAmount;
+                summary.HoApprovalRemark = log.Remark;
+            }
+        }
+
+        return summaries;
+    }
 
     private async Task<IReadOnlyCollection<LoyaltyScheme>> LoadSchemesAsync(IEnumerable<DateTime> invoiceDates, CancellationToken cancellationToken)
     {
@@ -390,7 +442,10 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             .ToListAsync(cancellationToken);
     }
 
-    private static IReadOnlyCollection<NewInvoiceDto> ToSchemeDtos(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, IReadOnlyCollection<LoyaltyScheme> schemes, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices)
+    private static ApprovalStageSummary ApprovalSummary(ulong invoiceId, IReadOnlyDictionary<ulong, ApprovalStageSummary> approvals) =>
+        approvals.TryGetValue(invoiceId, out var summary) ? summary : new ApprovalStageSummary();
+
+    private static IReadOnlyCollection<NewInvoiceDto> ToSchemeDtos(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, IReadOnlyCollection<LoyaltyScheme> schemes, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices, ApprovalStageSummary approvalSummary)
     {
         var invoiceDate = DateOnly.FromDateTime(invoice.InvoiceDate.Date);
         var matchingSchemes = schemes
@@ -399,15 +454,15 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             .ThenBy(scheme => scheme.SchemeName)
             .ToList();
 
-        if (matchingSchemes.Count == 0) return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null)];
+        if (matchingSchemes.Count == 0) return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null, approvalSummary)];
         return matchingSchemes.Select(scheme =>
         {
             var periodAmount = PeriodAmount(invoice, scheme, schemeInvoices);
-            return ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, scheme, CalculateSchemeResult(invoice.Amount, periodAmount, scheme));
+            return ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, scheme, CalculateSchemeResult(invoice.Amount, periodAmount, scheme), approvalSummary);
         }).ToList();
     }
 
-    private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult)
+    private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult, ApprovalStageSummary approvalSummary)
     {
         var schemePoints = schemeResult?.Points ?? 0;
         var isBooster = string.Equals(scheme?.SchemeTag, "Booster", StringComparison.OrdinalIgnoreCase);
@@ -442,6 +497,12 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             ApprovalStatus = invoice.ApprovalStatus,
             ApprovalStatusLabel = StatusLabel(invoice.ApprovalStatus),
             ApprovalRemark = invoice.ApprovalRemark,
+            SsApprovedAmount = approvalSummary.SsApprovedAmount,
+            SsApprovalRemark = approvalSummary.SsApprovalRemark,
+            SalesApprovedAmount = approvalSummary.SalesApprovedAmount,
+            SalesApprovalRemark = approvalSummary.SalesApprovalRemark,
+            HoApprovedAmount = approvalSummary.HoApprovedAmount,
+            HoApprovalRemark = approvalSummary.HoApprovalRemark,
             CreatedBy = invoice.CreatedBy,
             CreatedByName = creator?.Name,
             CreatedAt = invoice.CreatedAt,
@@ -615,4 +676,14 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     private sealed record SchemeInvoiceAmount(ulong InvoiceId, ulong CustomerId, DateTime InvoiceDate, decimal Amount);
 
     private sealed record SchemeResult(decimal Points, decimal? RewardValue, string? TierName, string? HintMessage);
+
+    private sealed class ApprovalStageSummary
+    {
+        public decimal? SsApprovedAmount { get; set; }
+        public string? SsApprovalRemark { get; set; }
+        public decimal? SalesApprovedAmount { get; set; }
+        public string? SalesApprovalRemark { get; set; }
+        public decimal? HoApprovedAmount { get; set; }
+        public string? HoApprovalRemark { get; set; }
+    }
 }

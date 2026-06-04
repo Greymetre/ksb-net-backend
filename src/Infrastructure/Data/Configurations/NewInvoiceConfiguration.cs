@@ -52,6 +52,7 @@ public sealed class NewInvoiceApprovalLogConfiguration : IEntityTypeConfiguratio
         builder.Property(x => x.StatusType).HasColumnName("status_type").HasMaxLength(255);
         builder.Property(x => x.FromStatus).HasColumnName("from_status");
         builder.Property(x => x.ToStatus).HasColumnName("to_status");
+        builder.Property(x => x.ApprovedAmount).HasColumnName("approved_amount").HasPrecision(15, 2);
         builder.Property(x => x.Remark).HasColumnName("remark").HasColumnType("text");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at");

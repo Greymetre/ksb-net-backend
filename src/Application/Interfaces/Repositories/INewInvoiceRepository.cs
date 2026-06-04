@@ -12,6 +12,6 @@ public interface INewInvoiceRepository
     Task<bool> InvoiceNumberExistsAsync(string invoiceNumber, ulong? exceptId, CancellationToken cancellationToken);
     Task<NewInvoiceDto> CreateInvoiceAsync(NewInvoice invoice, CancellationToken cancellationToken);
     Task<NewInvoice?> FindInvoiceEntityAsync(ulong id, CancellationToken cancellationToken);
-    Task<NewInvoiceDto> SaveInvoiceAsync(NewInvoice invoice, string statusType, int? fromStatus, int toStatus, ulong actorUserId, string? remark, CancellationToken cancellationToken);
+    Task<NewInvoiceDto> SaveInvoiceAsync(NewInvoice invoice, string statusType, int? fromStatus, int toStatus, ulong actorUserId, string? remark, decimal? approvedAmount, CancellationToken cancellationToken);
     Task<bool> DeleteInvoiceAsync(NewInvoice invoice, CancellationToken cancellationToken);
 }

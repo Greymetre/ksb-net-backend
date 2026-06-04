@@ -31,6 +31,12 @@ public sealed class NewInvoiceDto
     public int ApprovalStatus { get; set; }
     public string ApprovalStatusLabel { get; set; } = string.Empty;
     public string? ApprovalRemark { get; set; }
+    public decimal? SsApprovedAmount { get; set; }
+    public string? SsApprovalRemark { get; set; }
+    public decimal? SalesApprovedAmount { get; set; }
+    public string? SalesApprovalRemark { get; set; }
+    public decimal? HoApprovedAmount { get; set; }
+    public string? HoApprovalRemark { get; set; }
     public ulong CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime? CreatedAt { get; set; }
@@ -48,6 +54,7 @@ public sealed class NewInvoiceApprovalLogDto
     public string StatusType { get; set; } = string.Empty;
     public int? FromStatus { get; set; }
     public int? ToStatus { get; set; }
+    public decimal? ApprovedAmount { get; set; }
     public string? Remark { get; set; }
     public DateTime? CreatedAt { get; set; }
 }
@@ -98,4 +105,5 @@ public sealed class RetailerOptionDto
 public sealed class NewInvoiceApprovalRequestDto
 {
     public string? Remark { get; set; }
+    public decimal? ApprovedAmount { get; set; }
 }
