@@ -35,6 +35,7 @@ builder.Services.AddInfrastructure(builder.Configuration);
 
 var jwt = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwt["Key"] ?? throw new InvalidOperationException("Jwt:Key is not configured.");
+var allowedCorsOrigins = GetCorsOrigins(builder.Configuration);
 
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -72,6 +73,25 @@ builder.Services
             }
         };
     });
+
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("FrontendCors", policy =>
+    {
+        if (allowedCorsOrigins.Length == 0)
+        {
+            policy.AllowAnyOrigin();
+        }
+        else
+        {
+            policy.WithOrigins(allowedCorsOrigins);
+        }
+
+        policy
+            .AllowAnyHeader()
+            .AllowAnyMethod();
+    });
+});
 
 builder.Services.AddAuthorization();
 
@@ -115,6 +135,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseStaticFiles();
 app.UseRouting();
+app.UseCors("FrontendCors");
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
@@ -125,4 +146,19 @@ app.Run($"http://0.0.0.0:{port}");
 static bool HasFlag(string[] args, string flag)
 {
     return args.Any(arg => string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase));
+}
+
+static string[] GetCorsOrigins(IConfiguration configuration)
+{
+    var configuredOrigins = configuration["CORS"]
+        ?? configuration["Cors"]
+        ?? configuration["Cors:AllowedOrigins"]
+        ?? configuration["CORS_ALLOWED_ORIGINS"];
+
+    return (configuredOrigins ?? string.Empty)
+        .Split([',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        .Select(origin => origin.TrimEnd('/'))
+        .Where(origin => Uri.TryCreate(origin, UriKind.Absolute, out _))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
 }
