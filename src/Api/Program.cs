@@ -77,6 +77,17 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
+// Handle database migrations
+if (args.Any(arg => string.Equals(arg, "--migrate", StringComparison.OrdinalIgnoreCase)))
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    Console.WriteLine("Running database migrations...");
+    await dbContext.Database.MigrateAsync();
+    Console.WriteLine("Database migrations completed successfully.");
+    return;
+}
+
 if (args.Any(arg => string.Equals(arg, "--seed-superadmin", StringComparison.OrdinalIgnoreCase)))
 {
     using var scope = app.Services.CreateScope();
@@ -110,3 +121,4 @@ app.UseAuthorization();
 app.MapControllers();
 
 app.Run();
+
