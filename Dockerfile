@@ -20,8 +20,7 @@ WORKDIR /app
 
 COPY --from=build /app/publish ./
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
-
-ENV ASPNETCORE_URLS=http://0.0.0.0:${PORT:-8080}
+COPY db-bootstrap.sh /app/db-bootstrap.sh
+RUN chmod +x /app/docker-entrypoint.sh /app/db-bootstrap.sh
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

@@ -116,21 +116,18 @@ dotnet run --project src\Api\Api.csproj -- --seed-superadmin
 
 ## Docker and Railway Deploy
 
-The Docker image runs database setup before starting the API:
+Railway runs database setup through `preDeployCommand` before starting the API container:
 
 ```sh
-dotnet Api.dll --migrate
-dotnet Api.dll --seed-master-data
-dotnet Api.dll --seed-superadmin
-dotnet Api.dll
+/app/db-bootstrap.sh
 ```
 
-Railway is configured by `railway.json` to build with the backend `Dockerfile`. Set one of these database configurations in Railway:
+The bootstrap script runs migrations, master-data seed, and superadmin seed. Railway is configured by `railway.json` to build with the backend `Dockerfile`. Set one of these database configurations in Railway:
 
 - `KSB_PR_CONNECTION` with a full MySQL connection string.
 - Railway MySQL variables such as `MYSQL_URL`, `DATABASE_URL`, or `MYSQLHOST`/`MYSQLDATABASE`/`MYSQLUSER`/`MYSQLPASSWORD`/`MYSQLPORT`.
 
-Set `SKIP_DB_BOOTSTRAP=true` only if you need to start the container without running migrations and seeders.
+Set `SKIP_DB_BOOTSTRAP=true` only if you need to deploy without running migrations and seeders.
 
 For design-time migration generation without editing appsettings:
 
