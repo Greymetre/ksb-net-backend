@@ -19,7 +19,9 @@ FROM mcr.microsoft.com/dotnet/aspnet:8.0 AS runtime
 WORKDIR /app
 
 COPY --from=build /app/publish ./
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 ENV ASPNETCORE_URLS=http://0.0.0.0:${PORT:-8080}
 
-ENTRYPOINT ["dotnet", "Api.dll"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]

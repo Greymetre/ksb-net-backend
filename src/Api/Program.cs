@@ -77,7 +77,17 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-if (args.Any(arg => string.Equals(arg, "--seed-superadmin", StringComparison.OrdinalIgnoreCase)))
+if (HasFlag(args, "--migrate"))
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    dbContext.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
+    await dbContext.Database.MigrateAsync();
+    Console.WriteLine("Database migration completed.");
+    return;
+}
+
+if (HasFlag(args, "--seed-superadmin"))
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -86,7 +96,7 @@ if (args.Any(arg => string.Equals(arg, "--seed-superadmin", StringComparison.Ord
     return;
 }
 
-if (args.Any(arg => string.Equals(arg, "--seed-master-data", StringComparison.OrdinalIgnoreCase)))
+if (HasFlag(args, "--seed-master-data"))
 {
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -111,3 +121,8 @@ app.MapControllers();
 
 var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
 app.Run($"http://0.0.0.0:{port}");
+
+static bool HasFlag(string[] args, string flag)
+{
+    return args.Any(arg => string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase));
+}
