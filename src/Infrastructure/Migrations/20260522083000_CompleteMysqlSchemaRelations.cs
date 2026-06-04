@@ -15,12 +15,12 @@ namespace Infrastructure.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql(@"SET FOREIGN_KEY_CHECKS=0;");
-            migrationBuilder.Sql(@"ALTER TABLE `users` ADD COLUMN IF NOT EXISTS `login_at` timestamp NULL DEFAULT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE `customers` ADD COLUMN IF NOT EXISTS `working_status` varchar(255) DEFAULT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE `customers` ADD COLUMN IF NOT EXISTS `creation_date` varchar(255) DEFAULT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE `user_details` ADD COLUMN IF NOT EXISTS `pan_card_image` varchar(225) DEFAULT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE `user_details` ADD COLUMN IF NOT EXISTS `aadhar_card_image` varchar(225) DEFAULT NULL;");
-            migrationBuilder.Sql(@"ALTER TABLE `mobile_user_login_details` ADD COLUMN IF NOT EXISTS `active` varchar(1) NOT NULL DEFAULT 'Y';");
+            AddColumnIfNotExists(migrationBuilder, "users", "login_at", "timestamp NULL DEFAULT NULL");
+            AddColumnIfNotExists(migrationBuilder, "customers", "working_status", "varchar(255) DEFAULT NULL");
+            AddColumnIfNotExists(migrationBuilder, "customers", "creation_date", "varchar(255) DEFAULT NULL");
+            AddColumnIfNotExists(migrationBuilder, "user_details", "pan_card_image", "varchar(225) DEFAULT NULL");
+            AddColumnIfNotExists(migrationBuilder, "user_details", "aadhar_card_image", "varchar(225) DEFAULT NULL");
+            AddColumnIfNotExists(migrationBuilder, "mobile_user_login_details", "active", "varchar(1) NOT NULL DEFAULT 'Y'");
             migrationBuilder.Sql(@"CREATE TABLE IF NOT EXISTS `active_customer_processes` (
   `id` bigint(20) UNSIGNED NOT NULL,
   `customer_id` bigint(20) UNSIGNED NOT NULL,
@@ -4096,12 +4096,12 @@ namespace Infrastructure.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.Sql(@"SET FOREIGN_KEY_CHECKS=0;");
-            migrationBuilder.Sql(@"ALTER TABLE `mobile_user_login_details` DROP COLUMN IF EXISTS `active`;");
-            migrationBuilder.Sql(@"ALTER TABLE `user_details` DROP COLUMN IF EXISTS `aadhar_card_image`;");
-            migrationBuilder.Sql(@"ALTER TABLE `user_details` DROP COLUMN IF EXISTS `pan_card_image`;");
-            migrationBuilder.Sql(@"ALTER TABLE `customers` DROP COLUMN IF EXISTS `creation_date`;");
-            migrationBuilder.Sql(@"ALTER TABLE `customers` DROP COLUMN IF EXISTS `working_status`;");
-            migrationBuilder.Sql(@"ALTER TABLE `users` DROP COLUMN IF EXISTS `login_at`;");
+            DropColumnIfExists(migrationBuilder, "mobile_user_login_details", "active");
+            DropColumnIfExists(migrationBuilder, "user_details", "aadhar_card_image");
+            DropColumnIfExists(migrationBuilder, "user_details", "pan_card_image");
+            DropColumnIfExists(migrationBuilder, "customers", "creation_date");
+            DropColumnIfExists(migrationBuilder, "customers", "working_status");
+            DropColumnIfExists(migrationBuilder, "users", "login_at");
             migrationBuilder.Sql(@"DROP TABLE IF EXISTS `warranty_timelines`;");
             migrationBuilder.Sql(@"DROP TABLE IF EXISTS `warranty_activations`;");
             migrationBuilder.Sql(@"DROP TABLE IF EXISTS `ware_houses`;");
@@ -4286,6 +4286,54 @@ namespace Infrastructure.Migrations
             migrationBuilder.Sql(@"DROP TABLE IF EXISTS `active_customer_process_steps`;");
             migrationBuilder.Sql(@"DROP TABLE IF EXISTS `active_customer_processes`;");
             migrationBuilder.Sql(@"SET FOREIGN_KEY_CHECKS=1;");
+        }
+
+        private static void AddColumnIfNotExists(MigrationBuilder migrationBuilder, string tableName, string columnName, string columnDefinition)
+        {
+            migrationBuilder.Sql($@"SET @column_exists = (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = '{EscapeSqlLiteral(tableName)}'
+    AND COLUMN_NAME = '{EscapeSqlLiteral(columnName)}'
+);");
+            migrationBuilder.Sql($@"SET @migration_sql = IF(
+  @column_exists = 0,
+  'ALTER TABLE `{EscapeIdentifier(tableName)}` ADD COLUMN `{EscapeIdentifier(columnName)}` {EscapeSqlLiteral(columnDefinition)}',
+  'SELECT 1'
+);");
+            migrationBuilder.Sql(@"PREPARE migration_stmt FROM @migration_sql;");
+            migrationBuilder.Sql(@"EXECUTE migration_stmt;");
+            migrationBuilder.Sql(@"DEALLOCATE PREPARE migration_stmt;");
+        }
+
+        private static void DropColumnIfExists(MigrationBuilder migrationBuilder, string tableName, string columnName)
+        {
+            migrationBuilder.Sql($@"SET @column_exists = (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = '{EscapeSqlLiteral(tableName)}'
+    AND COLUMN_NAME = '{EscapeSqlLiteral(columnName)}'
+);");
+            migrationBuilder.Sql($@"SET @migration_sql = IF(
+  @column_exists > 0,
+  'ALTER TABLE `{EscapeIdentifier(tableName)}` DROP COLUMN `{EscapeIdentifier(columnName)}`',
+  'SELECT 1'
+);");
+            migrationBuilder.Sql(@"PREPARE migration_stmt FROM @migration_sql;");
+            migrationBuilder.Sql(@"EXECUTE migration_stmt;");
+            migrationBuilder.Sql(@"DEALLOCATE PREPARE migration_stmt;");
+        }
+
+        private static string EscapeIdentifier(string value)
+        {
+            return value.Replace("`", "``", StringComparison.Ordinal);
+        }
+
+        private static string EscapeSqlLiteral(string value)
+        {
+            return value.Replace("'", "''", StringComparison.Ordinal);
         }
     }
 }

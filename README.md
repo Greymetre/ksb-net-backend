@@ -114,6 +114,24 @@ dotnet run --project src\Api\Api.csproj -- --seed-superadmin
 
 `dotnet ef database update` applies all pending EF Core migrations to the configured database. The seeder commands use the same connection string as the API from `src/Api/appsettings.json`, `src/Api/appsettings.Development.json`, or the `KSB_PR_CONNECTION` environment variable.
 
+## Docker and Railway Deploy
+
+The Docker image runs database setup before starting the API:
+
+```sh
+dotnet Api.dll --migrate
+dotnet Api.dll --seed-master-data
+dotnet Api.dll --seed-superadmin
+dotnet Api.dll
+```
+
+Railway is configured by `railway.json` to build with the backend `Dockerfile`. Set one of these database configurations in Railway:
+
+- `KSB_PR_CONNECTION` with a full MySQL connection string.
+- Railway MySQL variables such as `MYSQL_URL`, `DATABASE_URL`, or `MYSQLHOST`/`MYSQLDATABASE`/`MYSQLUSER`/`MYSQLPASSWORD`/`MYSQLPORT`.
+
+Set `SKIP_DB_BOOTSTRAP=true` only if you need to start the container without running migrations and seeders.
+
 For design-time migration generation without editing appsettings:
 
 ```powershell
