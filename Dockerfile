@@ -11,7 +11,7 @@ COPY src/Shared/Shared.csproj src/Shared/
 
 RUN dotnet restore
 
-# Copy the rest of the source and publish
+# Copy everything else and publish
 COPY src/ src/
 RUN dotnet publish src/Api/Api.csproj -c Release -o /app/publish --no-restore
 
@@ -23,3 +23,4 @@ COPY --from=build /app/publish ./
 ENV ASPNETCORE_URLS=http://0.0.0.0:${PORT:-8080}
 
 ENTRYPOINT ["dotnet", "Api.dll"]
+
