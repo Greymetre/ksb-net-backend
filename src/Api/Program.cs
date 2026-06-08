@@ -11,7 +11,6 @@ using Infrastructure.Seeders.MasterData;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using MySqlConnector;
 
 JwtSecurityTokenHandler.DefaultInboundClaimTypeMap.Clear();
 
@@ -103,17 +102,8 @@ if (HasFlag(args, "--migrate"))
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
-
-    try
-    {
-        await dbContext.Database.MigrateAsync();
-        Console.WriteLine("Database migration completed.");
-    }
-    catch (MySqlException ex) when (IsAlreadyExistingSchemaObjectError(ex))
-    {
-        Console.WriteLine($"Database migration skipped because schema already exists: {ex.Message}");
-    }
-
+    await dbContext.Database.MigrateAsync();
+    Console.WriteLine("Database migration completed.");
     return;
 }
 
@@ -156,13 +146,6 @@ app.Run($"http://0.0.0.0:{port}");
 static bool HasFlag(string[] args, string flag)
 {
     return args.Any(arg => string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase));
-}
-
-static bool IsAlreadyExistingSchemaObjectError(MySqlException exception)
-{
-    return exception.Number is 1050 // Table already exists.
-        or 1060 // Duplicate column name.
-        or 1061; // Duplicate key name.
 }
 
 static string[] GetCorsOrigins(IConfiguration configuration)

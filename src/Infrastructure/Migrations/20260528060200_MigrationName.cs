@@ -12,6 +12,10 @@ namespace Infrastructure.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // These tables are already covered by 20260522083000_CompleteMysqlSchemaRelations.
+            // Keep this migration as an applied no-op so later migrations can continue.
+            return;
+
             migrationBuilder.CreateTable(
                 name: "branches",
                 columns: table => new
