@@ -32,9 +32,9 @@ public sealed class ProductsController : ControllerBase
 
     [RequirePermission("category_download")]
     [HttpGet("segments/export")]
-    public async Task<IActionResult> ExportSegments(CancellationToken cancellationToken)
+    public async Task<IActionResult> ExportSegments([FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var file = await _service.ExportSegmentsAsync(cancellationToken);
+        var file = await _service.ExportSegmentsAsync(search, cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 
@@ -87,9 +87,9 @@ public sealed class ProductsController : ControllerBase
 
     [RequirePermission("subcategory_download")]
     [HttpGet("families/export")]
-    public async Task<IActionResult> ExportFamilies(CancellationToken cancellationToken)
+    public async Task<IActionResult> ExportFamilies([FromQuery(Name = "segment_id")] ulong? segmentId, [FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var file = await _service.ExportFamiliesAsync(cancellationToken);
+        var file = await _service.ExportFamiliesAsync(segmentId, search, cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 
@@ -138,9 +138,9 @@ public sealed class ProductsController : ControllerBase
 
     [RequirePermission("product_download")]
     [HttpGet("products/export")]
-    public async Task<IActionResult> ExportProducts(CancellationToken cancellationToken)
+    public async Task<IActionResult> ExportProducts([FromQuery(Name = "segment_id")] ulong? segmentId, [FromQuery(Name = "family_id")] ulong? familyId, [FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var file = await _service.ExportProductsAsync(cancellationToken);
+        var file = await _service.ExportProductsAsync(segmentId, familyId, search, cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 
@@ -234,4 +234,3 @@ public sealed class ProductFormRequest
     [FromForm(Name = "attachment")] public string? Attachment { get; set; }
     [FromForm(Name = "attachment_file")] public IFormFile? AttachmentFile { get; set; }
 }
-

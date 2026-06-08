@@ -68,12 +68,13 @@ public sealed class RedemptionService : IRedemptionService
 
     public async Task<LaravelApiResponse> GetCustomerOptionsAsync(string? search, ulong? actorUserId, CancellationToken cancellationToken)
     {
-        var customers = await _customerRepository.GetCustomersAsync(new CustomerListFilterDto
+        var customers = (await _customerRepository.GetCustomersAsync(new CustomerListFilterDto
         {
-            CustomerType = 2,
             Active = "Y",
             Search = search
-        }, cancellationToken);
+        }, cancellationToken))
+            .Where(customer => customer.CustomerType is 2 or 3)
+            .ToList();
 
         var invoices = await _newInvoiceRepository.GetInvoicesAsync(new NewInvoiceFilterDto(), actorUserId, cancellationToken);
         var options = new List<RedemptionCustomerOptionDto>();
@@ -256,6 +257,7 @@ public sealed class RedemptionService : IRedemptionService
     {
         1 => "DIS",
         2 => "RET",
+        3 => "INF",
         _ => "CUS"
     };
 

@@ -441,6 +441,8 @@ public sealed class CustomerRepository : ICustomerRepository
 
     private static bool CustomerTypeMatches(string customerType) =>
         string.Equals(customerType, "Retailer", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(customerType, "Influencers", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(customerType, "Influencer", StringComparison.OrdinalIgnoreCase)
         || string.Equals(customerType, "Retailer + Plumber", StringComparison.OrdinalIgnoreCase);
 
     private static decimal PeriodAmount(ulong customerId, LoyaltyScheme scheme, IEnumerable<NewInvoice> invoices)
@@ -533,6 +535,7 @@ public sealed class CustomerRepository : ICustomerRepository
     {
         1 => "Distributor",
         2 => "Retailer",
+        3 => "Influencers",
         null => string.Empty,
         _ => $"Type {type}"
     };

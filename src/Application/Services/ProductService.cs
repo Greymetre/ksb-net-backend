@@ -22,9 +22,9 @@ public sealed class ProductService : IProductService
     public async Task<LaravelApiResponse> GetSegmentsAsync(string? search, bool includeInactive, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("segments", await _repository.GetSegmentsAsync(search, includeInactive, cancellationToken));
 
-    public async Task<MasterDataFileDto> ExportSegmentsAsync(CancellationToken cancellationToken)
+    public async Task<MasterDataFileDto> ExportSegmentsAsync(string? search, CancellationToken cancellationToken)
     {
-        var rows = await _repository.GetSegmentsAsync(null, true, cancellationToken);
+        var rows = await _repository.GetSegmentsAsync(search, true, cancellationToken);
         return Workbook("segments.xlsx", ["id", "name", "active", "created_by", "created_at"],
             rows.Select(x => new object?[] { x.Id, x.Name, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
     }
@@ -75,9 +75,9 @@ public sealed class ProductService : IProductService
     public async Task<LaravelApiResponse> GetFamiliesAsync(ulong? segmentId, string? search, bool includeInactive, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("families", await _repository.GetFamiliesAsync(segmentId, search, includeInactive, cancellationToken));
 
-    public async Task<MasterDataFileDto> ExportFamiliesAsync(CancellationToken cancellationToken)
+    public async Task<MasterDataFileDto> ExportFamiliesAsync(ulong? segmentId, string? search, CancellationToken cancellationToken)
     {
-        var rows = await _repository.GetFamiliesAsync(null, null, true, cancellationToken);
+        var rows = await _repository.GetFamiliesAsync(segmentId, search, true, cancellationToken);
         return Workbook("families.xlsx", ["id", "segment_id", "segment_name", "name", "active", "created_by", "created_at"],
             rows.Select(x => new object?[] { x.Id, x.SegmentId, x.SegmentName, x.Name, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
     }
@@ -131,9 +131,9 @@ public sealed class ProductService : IProductService
     public async Task<LaravelApiResponse> GetProductsAsync(ulong? segmentId, ulong? familyId, string? search, bool includeInactive, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("products", await _repository.GetProductsAsync(segmentId, familyId, search, includeInactive, cancellationToken));
 
-    public async Task<MasterDataFileDto> ExportProductsAsync(CancellationToken cancellationToken)
+    public async Task<MasterDataFileDto> ExportProductsAsync(ulong? segmentId, ulong? familyId, string? search, CancellationToken cancellationToken)
     {
-        var rows = await _repository.GetProductsAsync(null, null, null, true, cancellationToken);
+        var rows = await _repository.GetProductsAsync(segmentId, familyId, search, true, cancellationToken);
         return Workbook("products.xlsx", ["id", "segment_id", "segment_name", "family_id", "family_name", "part_no", "product_name", "mrp", "attachment", "active"],
             rows.Select(x => new object?[] { x.Id, x.SegmentId, x.SegmentName, x.FamilyId, x.FamilyName, x.PartNo, x.ProductName, x.Mrp, x.Attachment, x.Active }));
     }

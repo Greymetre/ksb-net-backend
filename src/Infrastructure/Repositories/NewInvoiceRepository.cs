@@ -12,6 +12,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 {
     private const int MaxRows = 50000;
     private const ulong RetailerCustomerType = 2;
+    private const ulong InfluencerCustomerType = 3;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _dbContext;
 
@@ -61,7 +62,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     {
         var distributorCustomerId = await GetDistributorCustomerIdAsync(actorUserId, cancellationToken);
         var query = _dbContext.Customers.AsNoTracking()
-            .Where(x => x.Active == "Y" && x.CustomerType == RetailerCustomerType);
+            .Where(x => x.Active == "Y" && (x.CustomerType == RetailerCustomerType || x.CustomerType == InfluencerCustomerType));
         query = ApplyDistributorRetailerScope(query, distributorCustomerId);
 
         if (!string.IsNullOrWhiteSpace(search))
@@ -93,7 +94,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     public async Task<Customer?> GetRetailerAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
     {
         var distributorCustomerId = await GetDistributorCustomerIdAsync(actorUserId, cancellationToken);
-        var query = _dbContext.Customers.Where(x => x.Id == id && x.Active == "Y" && x.CustomerType == RetailerCustomerType);
+        var query = _dbContext.Customers.Where(x => x.Id == id && x.Active == "Y" && (x.CustomerType == RetailerCustomerType || x.CustomerType == InfluencerCustomerType));
         query = ApplyDistributorRetailerScope(query, distributorCustomerId);
         return await query.FirstOrDefaultAsync(cancellationToken);
     }
@@ -183,7 +184,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     {
         var query =
             from invoice in _dbContext.NewInvoices.AsNoTracking()
-            join customer in _dbContext.Customers.AsNoTracking().Where(x => x.CustomerType == RetailerCustomerType) on invoice.SecondaryCustomerId equals customer.Id
+            join customer in _dbContext.Customers.AsNoTracking().Where(x => x.CustomerType == RetailerCustomerType || x.CustomerType == InfluencerCustomerType) on invoice.SecondaryCustomerId equals customer.Id
             join creatorRow in _dbContext.Users.AsNoTracking() on invoice.CreatedBy equals creatorRow.Id into creators
             from creator in creators.DefaultIfEmpty()
             join branchRow in _dbContext.Branches.AsNoTracking() on creator.PrimaryBranchId equals branchRow.Id into branches
@@ -532,6 +533,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
     private static bool CustomerTypeMatches(string customerType) =>
         string.Equals(customerType, "Retailer", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(customerType, "Influencers", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(customerType, "Influencer", StringComparison.OrdinalIgnoreCase)
         || string.Equals(customerType, "Retailer + Plumber", StringComparison.OrdinalIgnoreCase);
 
     private static decimal PeriodAmount(NewInvoice invoice, LoyaltyScheme scheme, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices)

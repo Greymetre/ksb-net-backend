@@ -123,7 +123,7 @@ public sealed class RedemptionRepository : IRedemptionRepository
         RedeemMode = redemption.RedeemMode,
         Points = redemption.Points,
         AccountHolder = redemption.AccountHolder,
-        AccountNumber = MaskAccount(redemption.AccountNumber),
+        AccountNumber = redemption.AccountNumber,
         BankName = redemption.BankName,
         IfscCode = redemption.IfscCode,
         Status = redemption.Status,
@@ -145,6 +145,7 @@ public sealed class RedemptionRepository : IRedemptionRepository
     {
         1 => "Distributor",
         2 => "Retailer",
+        3 => "Influencers",
         null => string.Empty,
         _ => $"Type {type}"
     };
@@ -159,6 +160,7 @@ public sealed class RedemptionRepository : IRedemptionRepository
     {
         1 => "DIS",
         2 => "RET",
+        3 => "INF",
         _ => "CUS"
     };
 
@@ -180,9 +182,6 @@ public sealed class RedemptionRepository : IRedemptionRepository
 
     private static string? DistributorName(Customer? customer, IReadOnlyDictionary<ulong, string> distributors) =>
         customer is not null && distributors.TryGetValue(customer.Id, out var distributorName) ? distributorName : null;
-
-    private static string MaskAccount(string value) =>
-        value.Length <= 4 ? value : $"{new string('*', Math.Max(0, value.Length - 4))}{value[^4..]}";
 
     private static string? ReadField(Customer customer, string key)
     {

@@ -13,7 +13,7 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] SchemeTags = ["Regular", "Booster"];
-    private static readonly string[] CustomerTypes = ["Retailer", "Plumber", "Retailer + Plumber", "Sub-Dealer", "Distributor"];
+    private static readonly string[] CustomerTypes = ["Retailer", "Influencers", "Plumber", "Retailer + Plumber", "Sub-Dealer", "Distributor"];
     private static readonly string[] AreaScopes = ["All", "Branch", "Zone", "State", "Customer"];
     private static readonly string[] BasedOnOptions = ["Value", "Percentage"];
     private static readonly string[] StatusOptions = ["Draft", "Live", "Ended"];

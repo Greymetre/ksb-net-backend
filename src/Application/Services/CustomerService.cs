@@ -25,7 +25,7 @@ public sealed class CustomerService : ICustomerService
         "id", "customer_type", "name", "mobile", "contact_number", "active",
         "owner_name", "shop_name", "mobile_numbers", "distributor_name", "agri_distributor", "employee_id", "beat_id", "whatsapp_number",
         "address_line", "country_id", "state_id", "district_id", "city_id", "pincode_id",
-        "belt_area_market_name", "gst_number", "gst_attachment", "pan_number", "pan_attachment", "aadhar_attachment",
+        "belt_area_market_name", "gst_number", "gst_attachment", "pan_number", "pan_attachment", "aadhar_no", "aadhar_attachment",
         "bank_account_type", "bank_name", "bank_account_number", "ifsc_code", "account_holder_name",
         "bank_proof", "shop_photo", "gps_location"
     ];
@@ -38,7 +38,7 @@ public sealed class CustomerService : ICustomerService
         "distributor_code", "business_start_date", "country_id", "state_id", "district_id", "city_id", "pincode_id",
         "beat_id", "sales_executive_id", "supervisor_id", "distributor_name", "agri_distributor", "employee_id",
         "shop_image", "profile_image", "documents", "mou_file", "gst_number", "gst_attachment", "pan_number",
-        "pan_attachment", "aadhar_attachment", "bank_account_number", "ifsc_code", "bank_proof", "shop_photo", "gps_location"
+        "pan_attachment", "aadhar_no", "aadhar_attachment", "bank_account_number", "ifsc_code", "bank_proof", "shop_photo", "gps_location"
     };
 
     private static readonly HashSet<string> KycDocumentKeys = new(StringComparer.OrdinalIgnoreCase)
@@ -112,7 +112,7 @@ public sealed class CustomerService : ICustomerService
 
     public async Task<MasterDataFileDto> ExportCustomersAsync(CustomerListFilterDto filter, CancellationToken cancellationToken)
     {
-        if (filter.CustomerType is not 1 and not 2)
+        if (filter.CustomerType is not 1 and not 2 and not 3)
         {
             throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Customer type filter is required for export.");
         }
@@ -238,6 +238,7 @@ public sealed class CustomerService : ICustomerService
     {
         1 => "Distributor",
         2 => "Retailer",
+        3 => "Influencers",
         null => "All",
         _ => $"Type-{type}"
     };
@@ -393,7 +394,9 @@ public sealed class CustomerService : ICustomerService
             {
                 "distributor" => 1,
                 "retailer" => 2,
-                _ => throw new FormatException($"{heading} must be Distributor, Retailer, 1, or 2.")
+                "influencer" => 3,
+                "influencers" => 3,
+                _ => throw new FormatException($"{heading} must be Distributor, Retailer, Influencers, 1, 2, or 3.")
             };
         }
     }

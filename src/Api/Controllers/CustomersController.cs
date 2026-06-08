@@ -209,9 +209,13 @@ public sealed class CustomersController : ControllerBase
     private async Task<string?> SaveFileAsync(IFormFile? file, string folder, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0) return null;
-        if (IsRetailerImageFolder(folder) && !IsImageFile(file))
+        if (IsKycDocumentFolder(folder) && !IsPdfOrImageFile(file))
         {
-            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Retailer KYC attachments must be image files only.");
+            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Only PDF and image files are allowed.");
+        }
+        if (folder is "shop-photos" && !IsImageFile(file))
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Only image files are allowed.");
         }
 
         var extension = Path.GetExtension(file.FileName);
@@ -224,13 +228,20 @@ public sealed class CustomersController : ControllerBase
         return $"/uploads/customers/{folder}/{fileName}";
     }
 
-    private static bool IsRetailerImageFolder(string folder) =>
-        folder is "gst-attachments" or "pan-attachments" or "aadhar-attachments" or "bank-proofs" or "shop-photos";
+    private static bool IsKycDocumentFolder(string folder) =>
+        folder is "gst-attachments" or "pan-attachments" or "aadhar-attachments" or "bank-proofs";
 
     private static bool IsImageFile(IFormFile file)
     {
         if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return true;
         return Path.GetExtension(file.FileName).ToLowerInvariant() is ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp";
+    }
+
+    private static bool IsPdfOrImageFile(IFormFile file)
+    {
+        if (IsImageFile(file)) return true;
+        if (string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase)) return true;
+        return string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void SetField(IDictionary<string, string?> fields, string key, string? value)
