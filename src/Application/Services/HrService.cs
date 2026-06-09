@@ -107,7 +107,7 @@ public sealed class HrService : IHrService
     {
         var rows = await _repository.GetHolidaysAsync(filter, cancellationToken);
         return Workbook("holidays.xlsx", ["id", "holiday_for", "branch", "division", "holiday_names", "holiday_dates", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.HolidayFor, x.BranchName, x.DivisionName, x.Name, x.HolidayDate, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.HolidayFor, x.BranchName, x.DivisionName, x.Name, x.HolidayDate, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetLeavesAsync(LeaveListFilterDto filter, CancellationToken cancellationToken) =>
@@ -236,7 +236,7 @@ public sealed class HrService : IHrService
     {
         var rows = await _repository.GetLeavesAsync(filter, cancellationToken);
         return Workbook("leaves.xlsx", ["id", "employee_code", "user_name", "from_date", "to_date", "type", "balance_type", "reason", "status", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.EmployeeCode, x.UserName, x.FromDate, x.ToDate, x.Type, x.BalType, x.Reason, x.StatusLabel, x.CreatedByName, x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.EmployeeCode, x.UserName, x.FromDate, x.ToDate, x.Type, x.BalType, x.Reason, x.StatusLabel, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetToursAsync(TourListFilterDto filter, CancellationToken cancellationToken) =>

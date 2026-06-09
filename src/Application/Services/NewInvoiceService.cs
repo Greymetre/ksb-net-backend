@@ -34,10 +34,11 @@ public sealed class NewInvoiceService : INewInvoiceService
     {
         var invoices = await _repository.GetInvoicesAsync(filter, actorUserId, cancellationToken);
         return CreateWorkbook("new-invoices.xlsx",
-            ["retailer_id", "customer", "shop", "mobile", "assigned_distributor", "assigned_employee", "city", "zone", "invoice_date", "invoice_number", "amount", "ss_approved_amount", "ss_remark", "sales_approved_amount", "sales_remark", "ho_approved_amount", "ho_remark", "scheme_name", "points", "scheme_hint", "attachment", "status", "created_by", "created_at"],
+            ["id", "retailer_id", "customer", "shop", "mobile", "assigned_distributor", "assigned_employee", "city", "zone", "invoice_date", "invoice_number", "amount", "ss_approved_amount", "ss_remark", "sales_approved_amount", "sales_remark", "ho_approved_amount", "ho_remark", "scheme_name", "points", "scheme_hint", "attachment", "status", "created_by", "created_at"],
             invoices.Select(x => new object?[]
             {
-                x.RetailerCode,
+                x.Id,
+                x.SecondaryCustomerId,
                 x.CustomerName,
                 x.ShopName,
                 x.MobileNumber,
@@ -59,7 +60,7 @@ public sealed class NewInvoiceService : INewInvoiceService
                 x.SchemeHintMessage,
                 x.Attachment,
                 x.ApprovalStatusLabel,
-                x.CreatedByName,
+                x.CreatedBy,
                 x.CreatedAt
             }));
     }

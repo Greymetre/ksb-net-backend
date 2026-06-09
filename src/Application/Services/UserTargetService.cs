@@ -61,8 +61,8 @@ public sealed class UserTargetService : IUserTargetService
         var rows = await _repository.GetTargetsAsync(filter, cancellationToken);
         return CreateWorkbook(
             "sales_target_users.xlsx",
-            ["employee_code", "user_name", "designation", "branch_name", "sales_type", "month", "year", "target", "achievement", "achievement_percent"],
-            rows.Select(x => new object?[] { x.EmployeeCode, x.UserName, x.DesignationName, x.BranchName, x.Type, x.Month, x.Year, x.Target, x.Achievement, x.AchievementPercent }));
+            ["id", "user_id", "branch_id", "employee_code", "user_name", "designation", "branch_name", "sales_type", "month", "year", "target", "achievement", "achievement_percent"],
+            rows.Select(x => new object?[] { x.Id, x.UserId, x.BranchId, x.EmployeeCode, x.UserName, x.DesignationName, x.BranchName, x.Type, x.Month, x.Year, x.Target, x.Achievement, x.AchievementPercent }));
     }
 
     public Task<MasterDataFileDto> GetTemplateAsync(CancellationToken cancellationToken)

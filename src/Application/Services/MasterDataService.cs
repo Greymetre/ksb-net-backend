@@ -355,7 +355,7 @@ public sealed class MasterDataService : IMasterDataService
         return CreateWorkbook(
             "branch.xlsx",
             ["id", "branch_name", "branch_code", "warehouse_id", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.BranchName, x.BranchCode, x.WarehouseId, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.BranchName, x.BranchCode, x.WarehouseId, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetBranchAsync(ulong id, CancellationToken cancellationToken) =>
@@ -394,7 +394,7 @@ public sealed class MasterDataService : IMasterDataService
         return CreateWorkbook(
             "divisions.xlsx",
             ["id", "division_name", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.DivisionName, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.DivisionName, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetDivisionAsync(ulong id, CancellationToken cancellationToken) =>
@@ -433,7 +433,7 @@ public sealed class MasterDataService : IMasterDataService
         return CreateWorkbook(
             "designations.xlsx",
             ["id", "designation_name", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.DesignationName, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.DesignationName, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetDesignationAsync(ulong id, CancellationToken cancellationToken) =>
@@ -472,7 +472,7 @@ public sealed class MasterDataService : IMasterDataService
         return CreateWorkbook(
             "departments.xlsx",
             ["id", "name", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.Name, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.Name, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetDepartmentAsync(ulong id, CancellationToken cancellationToken) =>

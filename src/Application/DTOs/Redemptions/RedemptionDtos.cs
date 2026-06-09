@@ -23,6 +23,7 @@ public sealed class RedemptionDto
     public int Status { get; set; }
     public string StatusLabel { get; set; } = string.Empty;
     public string? Remark { get; set; }
+    public ulong? CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime? CreatedAt { get; set; }
 }

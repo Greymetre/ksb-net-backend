@@ -26,7 +26,7 @@ public sealed class ProductService : IProductService
     {
         var rows = await _repository.GetSegmentsAsync(search, true, cancellationToken);
         return Workbook("segments.xlsx", ["id", "name", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.Name, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.Name, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public Task<MasterDataFileDto> GetSegmentTemplateAsync(CancellationToken cancellationToken) =>
@@ -79,7 +79,7 @@ public sealed class ProductService : IProductService
     {
         var rows = await _repository.GetFamiliesAsync(segmentId, search, true, cancellationToken);
         return Workbook("families.xlsx", ["id", "segment_id", "segment_name", "name", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.SegmentId, x.SegmentName, x.Name, x.Active, x.CreatedByName ?? x.CreatedBy?.ToString(), x.CreatedAt }));
+            rows.Select(x => new object?[] { x.Id, x.SegmentId, x.SegmentName, x.Name, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public Task<MasterDataFileDto> GetFamilyTemplateAsync(CancellationToken cancellationToken) =>

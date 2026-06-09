@@ -75,9 +75,10 @@ public sealed class CityAssignmentService : ICityAssignmentService
     {
         var rows = await _repository.GetAssignmentsAsync(filter, cancellationToken);
         return Workbook("users.xlsx",
-            ["user_id", "user_name", "reportingid", "reporting_name", "city_id", "city_name", "grade", "district_id", "district_name", "status_id", "state_name", "Delete"],
+            ["id", "user_id", "user_name", "reportingid", "reporting_name", "city_id", "city_name", "grade", "district_id", "district_name", "status_id", "state_name", "Delete"],
             rows.Select(x => new object?[]
             {
+                x.Id,
                 x.UserId,
                 x.UserName,
                 x.ReportingId,

@@ -129,6 +129,7 @@ public sealed class RedemptionRepository : IRedemptionRepository
         Status = redemption.Status,
         StatusLabel = StatusLabel(redemption.Status),
         Remark = redemption.Remark,
+        CreatedBy = redemption.CreatedBy,
         CreatedByName = createdByName,
         CreatedAt = redemption.CreatedAt
     };
