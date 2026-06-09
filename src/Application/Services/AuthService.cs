@@ -311,11 +311,11 @@ public sealed class AuthService : IAuthService
         var isSuperAdmin = roleNames.Any(role => string.Equals(role, "superadmin", StringComparison.OrdinalIgnoreCase));
         var loginDetail = await _repository.GetUserLoginDetailAsync(user.Id, cancellationToken);
 
-        if (loginDetail is not null && !isSuperAdmin && !string.IsNullOrWhiteSpace(loginDetail.UniqueId)
-            && loginDetail.UniqueId != request.UniqueId && loginDetail.MultiLogin == "0")
-        {
-            throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, "Multiple device login not allowed. Contact support: 9713113280.");
-        }
+        // if (loginDetail is not null && !isSuperAdmin && !string.IsNullOrWhiteSpace(loginDetail.UniqueId)
+        //     && loginDetail.UniqueId != request.UniqueId && loginDetail.MultiLogin == "0")
+        // {
+        //     throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, "Multiple device login not allowed. Contact support: 9713113280.");
+        // }
 
         var token = _tokenService.CreateAccessToken("users", user.Id, user.Name, roleNames, out var tokenId);
         await _repository.StoreTokenAsync(new OAuthAccessToken
