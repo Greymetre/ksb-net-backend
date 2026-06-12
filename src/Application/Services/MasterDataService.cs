@@ -490,11 +490,14 @@ public sealed class MasterDataService : IMasterDataService
     public async Task<LaravelApiResponse> CreateDepartmentAsync(DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         RequireValue(request.Name, "Department name is required.");
+        await RequireUniqueDepartmentNameAsync(request.Name!, null, cancellationToken);
         return LaravelApiResponse.Success("department", await _repository.CreateDepartmentAsync(request, actorUserId, cancellationToken), "Department added successfully");
     }
 
     public async Task<LaravelApiResponse> UpdateDepartmentAsync(ulong id, DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        if (await _repository.GetDepartmentAsync(id, cancellationToken) is null) throw NotFound("Department not found");
+        if (!string.IsNullOrWhiteSpace(request.Name)) await RequireUniqueDepartmentNameAsync(request.Name, id, cancellationToken);
         var department = await _repository.UpdateDepartmentAsync(id, request, actorUserId, cancellationToken);
         return LaravelApiResponse.Success("department", department ?? throw NotFound("Department not found"), "Department updated successfully");
     }
@@ -708,6 +711,14 @@ public sealed class MasterDataService : IMasterDataService
         if (await _repository.DesignationNameExistsAsync(designationName, excludeId, cancellationToken))
         {
             throw BadRequest("Designation name already exists.");
+        }
+    }
+
+    private async Task RequireUniqueDepartmentNameAsync(string name, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        if (await _repository.DepartmentNameExistsAsync(name, excludeId, cancellationToken))
+        {
+            throw BadRequest("Department name already exists.");
         }
     }
 

@@ -61,11 +61,10 @@ public sealed class NewInvoicesController : ControllerBase
         filter.BranchId ??= branchId;
         filter.FromDate ??= fromDate;
         filter.ToDate ??= toDate;
-        var file = await _newInvoiceService.ExportInvoicesAsync(filter, CurrentUserId(), cancellationToken);
+        var file = await _newInvoiceService.ExportInvoicesAsync(filter, CurrentUserId(), BackendBaseUrl(), cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 
-    [RequirePermission("new_invoice_access", "new_invoice_create")]
     [HttpGet("retailers")]
     public async Task<IActionResult> GetRetailers([FromQuery] string? search, CancellationToken cancellationToken)
     {
@@ -145,6 +144,8 @@ public sealed class NewInvoicesController : ControllerBase
         var subject = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return ulong.TryParse(subject, out var userId) ? userId : null;
     }
+
+    private string BackendBaseUrl() => $"{Request.Scheme}://{Request.Host}";
 
     private async Task<NewInvoiceRequestDto> ToRequestAsync(NewInvoiceFormRequest form, CancellationToken cancellationToken)
     {

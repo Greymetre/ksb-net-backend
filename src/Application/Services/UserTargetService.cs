@@ -27,8 +27,8 @@ public sealed class UserTargetService : IUserTargetService
     public async Task<LaravelApiResponse> GetTargetAsync(ulong id, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("user_target", await GetOrThrowAsync(_repository.GetTargetDtoAsync(id, cancellationToken), "User Target not found"));
 
-    public async Task<LaravelApiResponse> GetOptionsAsync(CancellationToken cancellationToken) =>
-        LaravelApiResponse.Success("options", await _repository.GetOptionsAsync(cancellationToken));
+    public async Task<LaravelApiResponse> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken) =>
+        LaravelApiResponse.Success("options", await _repository.GetOptionsAsync(actorUserId, cancellationToken));
 
     public async Task<LaravelApiResponse> CreateTargetAsync(UserTargetRequestDto request, CancellationToken cancellationToken)
     {

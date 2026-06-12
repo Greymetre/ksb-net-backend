@@ -66,6 +66,7 @@ public interface IMasterDataRepository
     Task<IReadOnlyCollection<DepartmentDto>> GetDepartmentsAsync(string? search, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<DepartmentDto>> ExportDepartmentsAsync(CancellationToken cancellationToken);
     Task<DepartmentDto?> GetDepartmentAsync(ulong id, CancellationToken cancellationToken);
+    Task<bool> DepartmentNameExistsAsync(string name, ulong? excludeId, CancellationToken cancellationToken);
     Task<DepartmentDto> CreateDepartmentAsync(DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DepartmentDto?> UpdateDepartmentAsync(ulong id, DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DepartmentDto?> SetDepartmentActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken);

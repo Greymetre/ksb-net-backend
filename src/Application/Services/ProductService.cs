@@ -131,11 +131,11 @@ public sealed class ProductService : IProductService
     public async Task<LaravelApiResponse> GetProductsAsync(ulong? segmentId, ulong? familyId, string? search, bool includeInactive, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("products", await _repository.GetProductsAsync(segmentId, familyId, search, includeInactive, cancellationToken));
 
-    public async Task<MasterDataFileDto> ExportProductsAsync(ulong? segmentId, ulong? familyId, string? search, CancellationToken cancellationToken)
+    public async Task<MasterDataFileDto> ExportProductsAsync(ulong? segmentId, ulong? familyId, string? search, string baseUrl, CancellationToken cancellationToken)
     {
         var rows = await _repository.GetProductsAsync(segmentId, familyId, search, true, cancellationToken);
         return Workbook("products.xlsx", ["id", "segment_id", "segment_name", "family_id", "family_name", "part_no", "product_name", "mrp", "attachment", "active"],
-            rows.Select(x => new object?[] { x.Id, x.SegmentId, x.SegmentName, x.FamilyId, x.FamilyName, x.PartNo, x.ProductName, x.Mrp, x.Attachment, x.Active }));
+            rows.Select(x => new object?[] { x.Id, x.SegmentId, x.SegmentName, x.FamilyId, x.FamilyName, x.PartNo, x.ProductName, x.Mrp, ExportHyperlinkFactory.Attachment(x.Attachment, baseUrl), x.Active }));
     }
 
     public Task<MasterDataFileDto> GetProductTemplateAsync(CancellationToken cancellationToken) =>
@@ -229,7 +229,7 @@ public sealed class ProductService : IProductService
         var rowNumber = 2;
         foreach (var row in rows)
         {
-            for (var i = 0; i < row.Length; i++) worksheet.Cell(rowNumber, i + 1).Value = XLCellValue.FromObject(FormatExportValue(headings[i], row[i]));
+            for (var i = 0; i < row.Length; i++) SetCellValue(worksheet.Cell(rowNumber, i + 1), FormatExportValue(headings[i], row[i]));
             rowNumber++;
         }
         worksheet.Columns().AdjustToContents();
@@ -269,10 +269,22 @@ public sealed class ProductService : IProductService
     private static string TitleCaseHeading(string heading) => FirstCaps(heading.Replace("_", " "));
     private static object? FormatExportValue(string heading, object? value)
     {
+        if (value is ExportHyperlink) return value;
         if (value is not string text || string.IsNullOrWhiteSpace(text)) return value;
         var normalized = Normalize(heading);
         if (normalized is "id" or "segment_id" or "family_id" or "part_no" or "mrp" or "attachment" or "created_at") return value;
         return FirstCaps(text);
+    }
+    private static void SetCellValue(IXLCell cell, object? value)
+    {
+        if (value is ExportHyperlink link)
+        {
+            cell.Value = link.Text;
+            cell.SetHyperlink(new XLHyperlink(new Uri(link.Url)));
+            return;
+        }
+
+        cell.Value = XLCellValue.FromObject(value);
     }
     private static string FirstCaps(string value)
     {

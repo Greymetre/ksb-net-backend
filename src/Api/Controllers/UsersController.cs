@@ -52,11 +52,10 @@ public sealed class UsersController : ControllerBase
     }
 
     [Authorize]
-    [RequirePermission("user_access", "user_create", "user_edit")]
     [HttpGet("users/options")]
     public async Task<IActionResult> GetUserOptions(CancellationToken cancellationToken)
     {
-        var response = await _userService.GetUserOptionsAsync(cancellationToken);
+        var response = await _userService.GetUserOptionsAsync(CurrentUserId(), cancellationToken);
         return Ok(response);
     }
 

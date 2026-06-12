@@ -6,7 +6,7 @@ namespace Application.Interfaces.Services;
 public interface ICityAssignmentService
 {
     Task<LaravelApiResponse> GetAssignmentsAsync(CityAssignmentFilterDto filter, CancellationToken cancellationToken);
-    Task<LaravelApiResponse> GetOptionsAsync(CancellationToken cancellationToken);
+    Task<LaravelApiResponse> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> SaveAssignmentAsync(CityAssignmentRequestDto request, CancellationToken cancellationToken);
     Task<LaravelApiResponse> DeleteAssignmentAsync(ulong id, CancellationToken cancellationToken);
     Task<CityAssignmentFileDto> ExportAssignmentsAsync(CityAssignmentFilterDto filter, CancellationToken cancellationToken);

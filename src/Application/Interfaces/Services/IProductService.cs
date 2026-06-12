@@ -25,7 +25,7 @@ public interface IProductService
     Task<LaravelApiResponse> DeleteFamilyAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken);
 
     Task<LaravelApiResponse> GetProductsAsync(ulong? segmentId, ulong? familyId, string? search, bool includeInactive, CancellationToken cancellationToken);
-    Task<MasterDataFileDto> ExportProductsAsync(ulong? segmentId, ulong? familyId, string? search, CancellationToken cancellationToken);
+    Task<MasterDataFileDto> ExportProductsAsync(ulong? segmentId, ulong? familyId, string? search, string baseUrl, CancellationToken cancellationToken);
     Task<MasterDataFileDto> GetProductTemplateAsync(CancellationToken cancellationToken);
     Task<LaravelApiResponse> UploadProductsAsync(Stream fileStream, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> CreateProductAsync(ProductRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);

@@ -3,6 +3,7 @@ using Application.DTOs.UserTargets;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Api.Controllers;
 
@@ -27,10 +28,9 @@ public sealed class UserTargetsController : ControllerBase
     }
 
     [Authorize]
-    [RequirePermission("target_access", "target_users_access")]
     [HttpGet("user-targets/options")]
     public async Task<IActionResult> GetOptions(CancellationToken cancellationToken) =>
-        Ok(await _service.GetOptionsAsync(cancellationToken));
+        Ok(await _service.GetOptionsAsync(CurrentUserId(), cancellationToken));
 
     [Authorize]
     [RequirePermission("target_access", "target_users_access")]
@@ -84,5 +84,10 @@ public sealed class UserTargetsController : ControllerBase
         await using var stream = import_file.OpenReadStream();
         return Ok(await _service.UploadTargetsAsync(stream, cancellationToken));
     }
-}
 
+    private ulong? CurrentUserId()
+    {
+        var subject = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return ulong.TryParse(subject, out var userId) ? userId : null;
+    }
+}

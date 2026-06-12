@@ -5,7 +5,7 @@ namespace Application.Interfaces.Repositories;
 
 public interface IHrRepository
 {
-    Task<IReadOnlyList<HrLookupDto>> GetUsersAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<HrLookupDto>> GetUsersAsync(ulong? actorUserId, CancellationToken cancellationToken);
     Task<IReadOnlyList<HrLookupDto>> GetBranchesAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<HrLookupDto>> GetDivisionsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<HrLookupDto>> GetDesignationsAsync(CancellationToken cancellationToken);
@@ -24,7 +24,7 @@ public interface IHrRepository
     Task AddLeaveAsync(Leave leave, CancellationToken cancellationToken);
     Task DeleteLeaveAsync(Leave leave, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<TourDto>> GetToursAsync(TourListFilterDto filter, CancellationToken cancellationToken);
+    Task<IReadOnlyList<TourDto>> GetToursAsync(TourListFilterDto filter, IReadOnlyCollection<ulong>? allowedUserIds, CancellationToken cancellationToken);
     Task<TourProgramme?> GetTourEntityAsync(ulong id, CancellationToken cancellationToken);
     Task<TourDto?> GetTourAsync(ulong id, CancellationToken cancellationToken);
     Task AddTourAsync(TourProgramme tour, CancellationToken cancellationToken);
@@ -40,6 +40,7 @@ public interface IHrRepository
     Task<IReadOnlyList<Attendance>> GetAttendanceEntitiesInRangeAsync(DateTime startDate, DateTime endDate, CancellationToken cancellationToken);
 
     Task<User?> GetUserAsync(ulong id, CancellationToken cancellationToken);
+    Task<IReadOnlyCollection<ulong>> GetVisibleUserIdsAsync(ulong? actorUserId, CancellationToken cancellationToken);
     Task<IReadOnlyList<User>> GetReportUsersAsync(ulong? executiveId, ulong? designationId, CancellationToken cancellationToken);
     Task<IReadOnlyList<Holiday>> GetActiveHolidaysAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<Leave>> GetLeavesForUserDateRangeAsync(ulong userId, DateTime startDate, DateTime endDate, CancellationToken cancellationToken);

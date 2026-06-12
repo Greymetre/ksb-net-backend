@@ -140,7 +140,7 @@ public sealed class ProductsController : ControllerBase
     [HttpGet("products/export")]
     public async Task<IActionResult> ExportProducts([FromQuery(Name = "segment_id")] ulong? segmentId, [FromQuery(Name = "family_id")] ulong? familyId, [FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var file = await _service.ExportProductsAsync(segmentId, familyId, search, cancellationToken);
+        var file = await _service.ExportProductsAsync(segmentId, familyId, search, BackendBaseUrl(), cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 
@@ -216,6 +216,8 @@ public sealed class ProductsController : ControllerBase
         var subject = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return ulong.TryParse(subject, out var userId) ? userId : null;
     }
+
+    private string BackendBaseUrl() => $"{Request.Scheme}://{Request.Host}";
 }
 
 public sealed class ActiveRequest

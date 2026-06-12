@@ -1,7 +1,6 @@
 using Application.DTOs.UserTargets;
 using Application.DTOs.Users;
 using Application.Interfaces.Repositories;
-using Domain.Constants;
 using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -102,19 +101,14 @@ public sealed class UserTargetRepository : IUserTargetRepository
     public Task<SalesTargetUser?> GetTargetAsync(ulong id, CancellationToken cancellationToken) =>
         _dbContext.SalesTargetUsers.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-    public async Task<UserTargetOptionsDto> GetOptionsAsync(CancellationToken cancellationToken)
+    public async Task<UserTargetOptionsDto> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken)
     {
         var currentYear = DateTime.Now.Year;
+        var visibleUserIds = await ReportingVisibility.GetVisibleUserIdsAsync(_dbContext, actorUserId, cancellationToken);
         return new UserTargetOptionsDto
         {
-            Users = await _dbContext.Users.AsNoTracking()
-                .Where(user => user.Active == "Y"
-                    && !user.CustomerId.HasValue
-                    && !_dbContext.ModelHasRoles
-                        .Join(_dbContext.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
-                        .Any(x => x.modelRole.ModelId == user.Id
-                            && x.modelRole.ModelType == LaravelModelTypes.User
-                            && x.role.Name == "Customer Dealer"))
+            Users = await ReportingVisibility.InternalUsersQuery(_dbContext, _dbContext.Users.AsNoTracking())
+                .Where(user => user.Active == "Y" && visibleUserIds.Contains(user.Id))
                 .OrderBy(x => x.Name)
                 .Select(x => new OptionDto { Id = x.Id, Name = x.Name })
                 .ToListAsync(cancellationToken),

@@ -28,7 +28,6 @@ public sealed class ExpenseTypesController : ControllerBase
     }
 
     [HttpGet("options")]
-    [RequirePermission("expenses_type")]
     public async Task<IActionResult> GetOptions(CancellationToken cancellationToken)
     {
         var response = await _service.GetOptionsAsync(cancellationToken);

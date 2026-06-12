@@ -21,11 +21,11 @@ public sealed class HrService : IHrService
         _repository = repository;
     }
 
-    public async Task<LaravelApiResponse> GetOptionsAsync(CancellationToken cancellationToken)
+    public async Task<LaravelApiResponse> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken)
     {
         return LaravelApiResponse.Success("options", new
         {
-            users = await _repository.GetUsersAsync(cancellationToken),
+            users = await _repository.GetUsersAsync(actorUserId, cancellationToken),
             branches = await _repository.GetBranchesAsync(cancellationToken),
             divisions = await _repository.GetDivisionsAsync(cancellationToken),
             designations = await _repository.GetDesignationsAsync(cancellationToken),
@@ -239,14 +239,15 @@ public sealed class HrService : IHrService
             rows.Select(x => new object?[] { x.Id, x.EmployeeCode, x.UserName, x.FromDate, x.ToDate, x.Type, x.BalType, x.Reason, x.StatusLabel, x.CreatedBy, x.CreatedAt }));
     }
 
-    public async Task<LaravelApiResponse> GetToursAsync(TourListFilterDto filter, CancellationToken cancellationToken) =>
-        LaravelApiResponse.Success("tours", await _repository.GetToursAsync(filter, cancellationToken));
+    public async Task<LaravelApiResponse> GetToursAsync(TourListFilterDto filter, ulong? actorUserId, CancellationToken cancellationToken) =>
+        LaravelApiResponse.Success("tours", await _repository.GetToursAsync(filter, await _repository.GetVisibleUserIdsAsync(actorUserId, cancellationToken), cancellationToken));
 
     public async Task<LaravelApiResponse> GetTourAsync(ulong id, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("tour", await _repository.GetTourAsync(id, cancellationToken) ?? throw NotFound("Tour not found"));
 
     public async Task<LaravelApiResponse> CreateTourAsync(TourRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        await EnsureVisibleTourUserAsync(request.UserId, actorUserId, cancellationToken);
         var tour = new TourProgramme();
         ApplyTour(tour, request, actorUserId, true);
         await _repository.AddTourAsync(tour, cancellationToken);
@@ -257,6 +258,7 @@ public sealed class HrService : IHrService
 
     public async Task<LaravelApiResponse> UpdateTourAsync(ulong id, TourRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        await EnsureVisibleTourUserAsync(request.UserId, actorUserId, cancellationToken);
         var tour = await _repository.GetTourEntityAsync(id, cancellationToken) ?? throw NotFound("Tour not found");
         ApplyTour(tour, request, actorUserId, false);
         await _repository.SaveChangesAsync(cancellationToken);
@@ -289,9 +291,9 @@ public sealed class HrService : IHrService
         return LaravelApiResponse.MessageOnly("success", "Tour status changed successfully");
     }
 
-    public async Task<HrFileDto> ExportToursAsync(TourListFilterDto filter, CancellationToken cancellationToken)
+    public async Task<HrFileDto> ExportToursAsync(TourListFilterDto filter, ulong? actorUserId, CancellationToken cancellationToken)
     {
-        var rows = await _repository.GetToursAsync(filter, cancellationToken);
+        var rows = await _repository.GetToursAsync(filter, await _repository.GetVisibleUserIdsAsync(actorUserId, cancellationToken), cancellationToken);
         return Workbook("tours.xlsx", ["id", "date", "employee_code", "user_name", "district", "city", "objectives", "type", "status", "created_at"],
             rows.Select(x => new object?[] { x.Id, x.Date, x.EmployeeCode, x.UserName, x.DistrictName, x.TownName, x.Objectives, x.Type, x.StatusLabel, x.CreatedAt }));
     }
@@ -632,6 +634,16 @@ public sealed class HrService : IHrService
             tour.Status = 0;
             tour.CreatedBy = actorUserId;
             tour.CreatedAt = DateTime.UtcNow;
+        }
+    }
+
+    private async Task EnsureVisibleTourUserAsync(ulong? userId, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var selectedUserId = RequireId(userId, "User is required.");
+        var visibleUserIds = await _repository.GetVisibleUserIdsAsync(actorUserId, cancellationToken);
+        if (!visibleUserIds.Contains(selectedUserId))
+        {
+            throw BadRequest("Selected user is not in your reporting users.");
         }
     }
 

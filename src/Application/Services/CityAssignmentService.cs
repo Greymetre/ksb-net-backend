@@ -22,8 +22,8 @@ public sealed class CityAssignmentService : ICityAssignmentService
     public async Task<LaravelApiResponse> GetAssignmentsAsync(CityAssignmentFilterDto filter, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("assignments", await _repository.GetAssignmentsAsync(filter, cancellationToken));
 
-    public async Task<LaravelApiResponse> GetOptionsAsync(CancellationToken cancellationToken) =>
-        LaravelApiResponse.Success("options", await _repository.GetOptionsAsync(cancellationToken));
+    public async Task<LaravelApiResponse> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken) =>
+        LaravelApiResponse.Success("options", await _repository.GetOptionsAsync(actorUserId, cancellationToken));
 
     public async Task<LaravelApiResponse> SaveAssignmentAsync(CityAssignmentRequestDto request, CancellationToken cancellationToken)
     {

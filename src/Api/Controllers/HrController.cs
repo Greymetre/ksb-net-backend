@@ -21,7 +21,7 @@ public sealed class HrController : ControllerBase
 
     [HttpGet("hr/options")]
     public async Task<IActionResult> Options(CancellationToken cancellationToken) =>
-        Ok(await _hrService.GetOptionsAsync(cancellationToken));
+        Ok(await _hrService.GetOptionsAsync(CurrentUserId(), cancellationToken));
 
     [HttpGet("tours/ajax-user-districts")]
     public async Task<IActionResult> UserDistricts([FromQuery(Name = "user_id")] ulong userId, CancellationToken cancellationToken) =>
@@ -115,7 +115,7 @@ public sealed class HrController : ControllerBase
     [RequirePermission("tours")]
     [HttpGet("tours")]
     public async Task<IActionResult> Tours([FromQuery(Name = "executive_id")] ulong? executiveId, [FromQuery(Name = "division_id")] ulong? divisionId, [FromQuery(Name = "designation_id")] ulong? designationId, [FromQuery(Name = "start_date")] DateTime? startDate, [FromQuery(Name = "end_date")] DateTime? endDate, [FromQuery] string? search, CancellationToken cancellationToken) =>
-        Ok(await _hrService.GetToursAsync(new TourListFilterDto { ExecutiveId = executiveId, DivisionId = divisionId, DesignationId = designationId, StartDate = startDate, EndDate = endDate, Search = search }, cancellationToken));
+        Ok(await _hrService.GetToursAsync(new TourListFilterDto { ExecutiveId = executiveId, DivisionId = divisionId, DesignationId = designationId, StartDate = startDate, EndDate = endDate, Search = search }, CurrentUserId(), cancellationToken));
 
     [RequirePermission("tours")]
     [HttpGet("tours/{id}")]
@@ -149,7 +149,7 @@ public sealed class HrController : ControllerBase
     [HttpGet("tours/export")]
     public async Task<IActionResult> ExportTours([FromQuery(Name = "executive_id")] ulong? executiveId, [FromQuery(Name = "division_id")] ulong? divisionId, [FromQuery(Name = "designation_id")] ulong? designationId, [FromQuery(Name = "start_date")] DateTime? startDate, [FromQuery(Name = "end_date")] DateTime? endDate, [FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var file = await _hrService.ExportToursAsync(new TourListFilterDto { ExecutiveId = executiveId, DivisionId = divisionId, DesignationId = designationId, StartDate = startDate, EndDate = endDate, Search = search }, cancellationToken);
+        var file = await _hrService.ExportToursAsync(new TourListFilterDto { ExecutiveId = executiveId, DivisionId = divisionId, DesignationId = designationId, StartDate = startDate, EndDate = endDate, Search = search }, CurrentUserId(), cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 

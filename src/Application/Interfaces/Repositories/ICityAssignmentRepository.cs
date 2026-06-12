@@ -6,7 +6,7 @@ namespace Application.Interfaces.Repositories;
 public interface ICityAssignmentRepository
 {
     Task<IReadOnlyList<CityAssignmentDto>> GetAssignmentsAsync(CityAssignmentFilterDto filter, CancellationToken cancellationToken);
-    Task<CityAssignmentOptionsDto> GetOptionsAsync(CancellationToken cancellationToken);
+    Task<CityAssignmentOptionsDto> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken);
     Task<User?> GetUserByIdAsync(ulong userId, CancellationToken cancellationToken);
     Task<UserCityAssign?> GetAssignmentEntityAsync(ulong id, CancellationToken cancellationToken);
     Task<UserCityAssign?> GetAssignmentByUserCityAsync(ulong userId, ulong cityId, CancellationToken cancellationToken);

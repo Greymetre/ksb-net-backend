@@ -10,7 +10,7 @@ public interface IExpenseRepository
     Task<Expense?> GetExpenseAsync(ulong id, CancellationToken cancellationToken);
     Task<User?> GetUserAsync(ulong id, CancellationToken cancellationToken);
     Task<ExpenseType?> GetExpenseTypeAsync(ulong id, CancellationToken cancellationToken);
-    Task<ExpenseOptionsDto> GetOptionsAsync(CancellationToken cancellationToken);
+    Task<ExpenseOptionsDto> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken);
     Task AddExpenseAsync(Expense expense, CancellationToken cancellationToken);
     Task AddLogAsync(ExpenseLog log, CancellationToken cancellationToken);
     Task AddMediaAsync(Media media, CancellationToken cancellationToken);

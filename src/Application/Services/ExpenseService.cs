@@ -24,8 +24,8 @@ public sealed class ExpenseService : IExpenseService
     public async Task<LaravelApiResponse> GetExpenseAsync(ulong id, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("expense", await GetOrThrowAsync(_repository.GetExpenseDtoAsync(id, cancellationToken), "Expense not found"));
 
-    public async Task<LaravelApiResponse> GetOptionsAsync(CancellationToken cancellationToken) =>
-        LaravelApiResponse.Success("options", await _repository.GetOptionsAsync(cancellationToken));
+    public async Task<LaravelApiResponse> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken) =>
+        LaravelApiResponse.Success("options", await _repository.GetOptionsAsync(actorUserId, cancellationToken));
 
     public async Task<LaravelApiResponse> CreateExpenseAsync(ExpenseRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {

@@ -27,7 +27,6 @@ public sealed class LoyaltySchemesController : ControllerBase
         return Ok(response);
     }
 
-    [RequirePermission("scheme_access_list", "scheme_access", "scheme_create", "scheme_edit")]
     [HttpGet("options")]
     public async Task<IActionResult> GetOptions(CancellationToken cancellationToken)
     {

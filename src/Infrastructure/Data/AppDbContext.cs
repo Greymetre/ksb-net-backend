@@ -51,6 +51,9 @@ public sealed class AppDbContext : DbContext
     public DbSet<SalesTargetUser> SalesTargetUsers => Set<SalesTargetUser>();
     public DbSet<PrimarySale> PrimarySales => Set<PrimarySale>();
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<OrderDetail> OrderDetails => Set<OrderDetail>();
+    public DbSet<MasterDistributor> MasterDistributors => Set<MasterDistributor>();
+    public DbSet<SecondaryCustomer> SecondaryCustomers => Set<SecondaryCustomer>();
     public DbSet<ExpenseType> ExpenseTypes => Set<ExpenseType>();
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<ExpenseLog> ExpenseLogs => Set<ExpenseLog>();

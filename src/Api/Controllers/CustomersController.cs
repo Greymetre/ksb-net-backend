@@ -52,7 +52,7 @@ public sealed class CustomersController : ControllerBase
         CancellationToken cancellationToken)
     {
         ApplyQueryAliases(filter, customerType, stateId, cityId, pincodeId);
-        var file = await _customerService.ExportCustomersAsync(filter, cancellationToken);
+        var file = await _customerService.ExportCustomersAsync(filter, BackendBaseUrl(), cancellationToken);
         return File(file.Content, file.ContentType, file.FileName);
     }
 
@@ -140,6 +140,8 @@ public sealed class CustomersController : ControllerBase
         var subject = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return ulong.TryParse(subject, out var userId) ? userId : null;
     }
+
+    private string BackendBaseUrl() => $"{Request.Scheme}://{Request.Host}";
 
     private static void ApplyQueryAliases(CustomerListFilterDto filter, ulong? customerType, ulong? stateId, ulong? cityId, ulong? pincodeId)
     {

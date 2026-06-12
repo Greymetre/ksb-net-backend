@@ -41,6 +41,12 @@ public sealed class CustomerService : ICustomerService
         "pan_attachment", "aadhar_no", "aadhar_attachment", "bank_account_number", "ifsc_code", "bank_proof", "shop_photo", "gps_location"
     };
 
+    private static readonly HashSet<string> AttachmentColumns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "shop_image", "profile_image", "documents", "mou_file", "gst_attachment", "pan_attachment",
+        "aadhar_attachment", "bank_proof", "shop_photo"
+    };
+
     private static readonly HashSet<string> KycDocumentKeys = new(StringComparer.OrdinalIgnoreCase)
     {
         "gst",
@@ -110,7 +116,7 @@ public sealed class CustomerService : ICustomerService
         return LaravelApiResponse.MessageOnly("success", "Customer deleted successfully!");
     }
 
-    public async Task<MasterDataFileDto> ExportCustomersAsync(CustomerListFilterDto filter, CancellationToken cancellationToken)
+    public async Task<MasterDataFileDto> ExportCustomersAsync(CustomerListFilterDto filter, string baseUrl, CancellationToken cancellationToken)
     {
         if (filter.CustomerType is not 1 and not 2 and not 3)
         {
@@ -122,7 +128,7 @@ public sealed class CustomerService : ICustomerService
         return CreateWorkbook(
             $"customers-{CustomerTypeName(filter.CustomerType).ToLowerInvariant()}.xlsx",
             columns,
-            rows.Select(customer => ToExportRow(customer, columns)));
+            rows.Select(customer => ToExportRow(customer, columns, baseUrl)));
     }
 
     public Task<MasterDataFileDto> GetCustomerTemplateAsync(CancellationToken cancellationToken) =>
@@ -208,10 +214,10 @@ public sealed class CustomerService : ICustomerService
         return fields;
     }
 
-    private static object?[] ToExportRow(CustomerDto customer, string[] columns) =>
-        columns.Select(column => ExportValue(customer, column)).ToArray();
+    private static object?[] ToExportRow(CustomerDto customer, string[] columns, string baseUrl) =>
+        columns.Select(column => ExportValue(customer, column, baseUrl)).ToArray();
 
-    private static object? ExportValue(CustomerDto customer, string column)
+    private static object? ExportValue(CustomerDto customer, string column, string baseUrl)
     {
         object? value = column switch
         {
@@ -227,6 +233,11 @@ public sealed class CustomerService : ICustomerService
             "shop_image" => customer.ShopImage ?? Field(customer, column),
             _ => Field(customer, column)
         };
+
+        if (AttachmentColumns.Contains(column) && value is string attachment && !string.IsNullOrWhiteSpace(attachment))
+        {
+            return ExportHyperlinkFactory.Attachment(attachment, baseUrl);
+        }
 
         return value is string text && !PreserveRawColumns.Contains(column) ? TitleCase(text) : value;
     }
@@ -288,7 +299,7 @@ public sealed class CustomerService : ICustomerService
         {
             for (var column = 0; column < row.Length; column++)
             {
-                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(row[column]);
+                SetCellValue(worksheet.Cell(rowNumber, column + 1), row[column]);
             }
 
             rowNumber++;
@@ -298,6 +309,18 @@ public sealed class CustomerService : ICustomerService
         using var stream = new MemoryStream();
         workbook.SaveAs(stream);
         return new MasterDataFileDto { FileName = fileName, Content = stream.ToArray() };
+    }
+
+    private static void SetCellValue(IXLCell cell, object? value)
+    {
+        if (value is ExportHyperlink link)
+        {
+            cell.Value = link.Text;
+            cell.SetHyperlink(new XLHyperlink(new Uri(link.Url)));
+            return;
+        }
+
+        cell.Value = XLCellValue.FromObject(value);
     }
 
     private static async Task<MasterDataImportResultDto> ImportRowsAsync(Stream fileStream, Func<ExcelRow, Task<bool>> importRow, CancellationToken cancellationToken)

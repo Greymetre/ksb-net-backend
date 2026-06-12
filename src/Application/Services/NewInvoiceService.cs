@@ -30,7 +30,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         });
     }
 
-    public async Task<MasterDataFileDto> ExportInvoicesAsync(NewInvoiceFilterDto filter, ulong? actorUserId, CancellationToken cancellationToken)
+    public async Task<MasterDataFileDto> ExportInvoicesAsync(NewInvoiceFilterDto filter, ulong? actorUserId, string baseUrl, CancellationToken cancellationToken)
     {
         var invoices = await _repository.GetInvoicesAsync(filter, actorUserId, cancellationToken);
         return CreateWorkbook("new-invoices.xlsx",
@@ -58,7 +58,7 @@ public sealed class NewInvoiceService : INewInvoiceService
                 x.SchemeName,
                 x.SchemePoints,
                 x.SchemeHintMessage,
-                x.Attachment,
+                ExportHyperlinkFactory.Attachment(x.Attachment, baseUrl),
                 x.ApprovalStatusLabel,
                 x.CreatedBy,
                 x.CreatedAt
@@ -291,7 +291,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         {
             for (var column = 0; column < row.Length; column++)
             {
-                worksheet.Cell(rowNumber, column + 1).Value = XLCellValue.FromObject(row[column]);
+                SetCellValue(worksheet.Cell(rowNumber, column + 1), row[column]);
             }
 
             rowNumber++;
@@ -305,6 +305,18 @@ public sealed class NewInvoiceService : INewInvoiceService
 
     private static string TitleCase(string value) =>
         System.Globalization.CultureInfo.InvariantCulture.TextInfo.ToTitleCase(value.Trim().ToLowerInvariant());
+
+    private static void SetCellValue(IXLCell cell, object? value)
+    {
+        if (value is ExportHyperlink link)
+        {
+            cell.Value = link.Text;
+            cell.SetHyperlink(new XLHyperlink(new Uri(link.Url)));
+            return;
+        }
+
+        cell.Value = XLCellValue.FromObject(value);
+    }
 
     private static LaravelHttpException Http(int statusCode, object message) => new(statusCode, message);
 }

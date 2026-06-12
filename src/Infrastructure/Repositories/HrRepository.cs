@@ -1,6 +1,5 @@
 using Application.DTOs.Hr;
 using Application.Interfaces.Repositories;
-using Domain.Constants;
 using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +8,6 @@ namespace Infrastructure.Repositories;
 
 public sealed class HrRepository : IHrRepository
 {
-    private const string DistributorRoleName = "Distributor";
     private const int MaxRows = 50000;
     private readonly AppDbContext _db;
 
@@ -18,13 +16,17 @@ public sealed class HrRepository : IHrRepository
         _db = db;
     }
 
-    public async Task<IReadOnlyList<HrLookupDto>> GetUsersAsync(CancellationToken cancellationToken) =>
-        await InternalUsersQuery(_db.Users.AsNoTracking())
+    public async Task<IReadOnlyList<HrLookupDto>> GetUsersAsync(ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var visibleUserIds = await GetVisibleUserIdsAsync(actorUserId, cancellationToken);
+        return await InternalUsersQuery(_db.Users.AsNoTracking())
             .Where(x => x.Active == "Y" && !x.IsDeleted)
+            .Where(x => visibleUserIds.Contains(x.Id))
             .OrderBy(x => x.Name)
             .Take(MaxRows)
             .Select(x => new HrLookupDto { Id = x.Id, Name = x.Name })
             .ToListAsync(cancellationToken);
+    }
 
     public async Task<IReadOnlyList<HrLookupDto>> GetBranchesAsync(CancellationToken cancellationToken) =>
         await _db.Branches.AsNoTracking().OrderBy(x => x.BranchName)
@@ -186,13 +188,18 @@ public sealed class HrRepository : IHrRepository
         await _db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task<IReadOnlyList<TourDto>> GetToursAsync(TourListFilterDto filter, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<TourDto>> GetToursAsync(TourListFilterDto filter, IReadOnlyCollection<ulong>? allowedUserIds, CancellationToken cancellationToken)
     {
         var query = from tour in _db.TourProgrammes.AsNoTracking()
                     join user in _db.Users.AsNoTracking() on tour.UserId equals user.Id into users
                     from user in users.DefaultIfEmpty()
                     select new { tour, user };
 
+        if (allowedUserIds is not null)
+        {
+            if (allowedUserIds.Count == 0) return [];
+            query = query.Where(x => x.tour.UserId.HasValue && allowedUserIds.Contains(x.tour.UserId.Value));
+        }
         if (filter.ExecutiveId.HasValue) query = query.Where(x => x.tour.UserId == filter.ExecutiveId);
         if (filter.DivisionId.HasValue) query = query.Where(x => x.user.DivisionId == filter.DivisionId);
         if (filter.DesignationId.HasValue) query = query.Where(x => x.user.DesignationId == filter.DesignationId);
@@ -245,7 +252,7 @@ public sealed class HrRepository : IHrRepository
         _db.TourProgrammes.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
     public async Task<TourDto?> GetTourAsync(ulong id, CancellationToken cancellationToken) =>
-        (await GetToursAsync(new TourListFilterDto(), cancellationToken)).FirstOrDefault(x => x.Id == id);
+        (await GetToursAsync(new TourListFilterDto(), null, cancellationToken)).FirstOrDefault(x => x.Id == id);
 
     public async Task AddTourAsync(TourProgramme tour, CancellationToken cancellationToken)
     {
@@ -412,6 +419,9 @@ public sealed class HrRepository : IHrRepository
     public Task<User?> GetUserAsync(ulong id, CancellationToken cancellationToken) =>
         _db.Users.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public Task<IReadOnlyCollection<ulong>> GetVisibleUserIdsAsync(ulong? actorUserId, CancellationToken cancellationToken) =>
+        ReportingVisibility.GetVisibleUserIdsAsync(_db, actorUserId, cancellationToken);
+
     public async Task<IReadOnlyList<User>> GetReportUsersAsync(ulong? executiveId, ulong? designationId, CancellationToken cancellationToken)
     {
         var query = _db.Users.AsNoTracking().Where(x => x.Active == "Y" && !x.IsDeleted && x.ShowAttandanceReport == "1");
@@ -452,9 +462,5 @@ public sealed class HrRepository : IHrRepository
         value.HasValue && value.Value > 0 ? (ulong)value.Value : null;
 
     private IQueryable<User> InternalUsersQuery(IQueryable<User> query) =>
-        query.Where(user =>
-            !user.CustomerId.HasValue
-            && !_db.ModelHasRoles
-                .Join(_db.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
-                .Any(x => x.modelRole.ModelId == user.Id && x.modelRole.ModelType == LaravelModelTypes.User && x.role.Name == DistributorRoleName));
+        ReportingVisibility.InternalUsersQuery(_db, query);
 }

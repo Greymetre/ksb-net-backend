@@ -52,8 +52,9 @@ public sealed class UserRepository : IUserRepository
         return users.FirstOrDefault();
     }
 
-    public async Task<UserOptionsDto> GetUserOptionsAsync(CancellationToken cancellationToken)
+    public async Task<UserOptionsDto> GetUserOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken)
     {
+        var visibleUserIds = await ReportingVisibility.GetVisibleUserIdsAsync(_dbContext, actorUserId, cancellationToken);
         var roles = await _dbContext.Roles.AsNoTracking()
             .Where(x => x.Name != "super-admin" && x.Name != DistributorRoleName)
             .OrderBy(x => x.Name)
@@ -86,6 +87,7 @@ public sealed class UserRepository : IUserRepository
 
         var reportings = await InternalUsersQuery(_dbContext.Users.AsNoTracking())
             .Where(x => x.Active == "Y")
+            .Where(x => visibleUserIds.Contains(x.Id))
             .OrderBy(x => x.Name)
             .Take(MaxRows)
             .Select(x => new OptionDto { Id = x.Id, Name = x.Name })

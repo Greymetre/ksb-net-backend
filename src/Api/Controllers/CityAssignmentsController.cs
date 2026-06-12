@@ -3,6 +3,7 @@ using Application.DTOs.CityAssignments;
 using Application.Interfaces.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 
 namespace Api.Controllers;
 
@@ -39,10 +40,9 @@ public sealed class CityAssignmentsController : ControllerBase
     }
 
     [Authorize]
-    [RequirePermission("city_assigned")]
     [HttpGet("city-assignments/options")]
     public async Task<IActionResult> GetOptions(CancellationToken cancellationToken) =>
-        Ok(await _service.GetOptionsAsync(cancellationToken));
+        Ok(await _service.GetOptionsAsync(CurrentUserId(), cancellationToken));
 
     [Authorize]
     [RequirePermission("city_assigned")]
@@ -94,5 +94,11 @@ public sealed class CityAssignmentsController : ControllerBase
     {
         await using var stream = import_file.OpenReadStream();
         return Ok(await _service.UploadAssignmentsAsync(stream, cancellationToken));
+    }
+
+    private ulong? CurrentUserId()
+    {
+        var subject = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return ulong.TryParse(subject, out var userId) ? userId : null;
     }
 }

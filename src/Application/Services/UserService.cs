@@ -49,8 +49,8 @@ public sealed class UserService : IUserService
         return LaravelApiResponse.Success("user", user ?? throw NotFound("User not found"));
     }
 
-    public async Task<LaravelApiResponse> GetUserOptionsAsync(CancellationToken cancellationToken) =>
-        LaravelApiResponse.Success("options", await _repository.GetUserOptionsAsync(cancellationToken));
+    public async Task<LaravelApiResponse> GetUserOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken) =>
+        LaravelApiResponse.Success("options", await _repository.GetUserOptionsAsync(actorUserId, cancellationToken));
 
     public async Task<LaravelApiResponse> CreateUserAsync(UserRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {

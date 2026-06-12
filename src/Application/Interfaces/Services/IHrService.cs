@@ -5,7 +5,7 @@ namespace Application.Interfaces.Services;
 
 public interface IHrService
 {
-    Task<LaravelApiResponse> GetOptionsAsync(CancellationToken cancellationToken);
+    Task<LaravelApiResponse> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> GetUserDistrictsAsync(ulong userId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> GetUserCitiesAsync(ulong userId, ulong districtId, CancellationToken cancellationToken);
 
@@ -24,13 +24,13 @@ public interface IHrService
     Task<LaravelApiResponse> CreateCompOffAsync(CompOffRequestDto request, CancellationToken cancellationToken);
     Task<HrFileDto> ExportLeavesAsync(LeaveListFilterDto filter, CancellationToken cancellationToken);
 
-    Task<LaravelApiResponse> GetToursAsync(TourListFilterDto filter, CancellationToken cancellationToken);
+    Task<LaravelApiResponse> GetToursAsync(TourListFilterDto filter, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> GetTourAsync(ulong id, CancellationToken cancellationToken);
     Task<LaravelApiResponse> CreateTourAsync(TourRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> UpdateTourAsync(ulong id, TourRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> DeleteTourAsync(ulong id, CancellationToken cancellationToken);
     Task<LaravelApiResponse> ChangeTourStatusAsync(TourStatusRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
-    Task<HrFileDto> ExportToursAsync(TourListFilterDto filter, CancellationToken cancellationToken);
+    Task<HrFileDto> ExportToursAsync(TourListFilterDto filter, ulong? actorUserId, CancellationToken cancellationToken);
     Task<HrFileDto> GetTourTemplateAsync(CancellationToken cancellationToken);
     Task<LaravelApiResponse> UploadToursAsync(Stream fileStream, ulong? actorUserId, CancellationToken cancellationToken);
 

@@ -1,7 +1,6 @@
 using Application.DTOs.Expenses;
 using Application.DTOs.Users;
 using Application.Interfaces.Repositories;
-using Domain.Constants;
 using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -117,18 +116,13 @@ public sealed class ExpenseRepository : IExpenseRepository
     public Task<ExpenseType?> GetExpenseTypeAsync(ulong id, CancellationToken cancellationToken) =>
         _dbContext.ExpenseTypes.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
-    public async Task<ExpenseOptionsDto> GetOptionsAsync(CancellationToken cancellationToken)
+    public async Task<ExpenseOptionsDto> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken)
     {
+        var visibleUserIds = await ReportingVisibility.GetVisibleUserIdsAsync(_dbContext, actorUserId, cancellationToken);
         return new ExpenseOptionsDto
         {
-            Users = await _dbContext.Users.AsNoTracking()
-                .Where(user => user.Active == "Y"
-                    && !user.CustomerId.HasValue
-                    && !_dbContext.ModelHasRoles
-                        .Join(_dbContext.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
-                        .Any(x => x.modelRole.ModelId == user.Id
-                            && x.modelRole.ModelType == LaravelModelTypes.User
-                            && x.role.Name == "Customer Dealer"))
+            Users = await ReportingVisibility.InternalUsersQuery(_dbContext, _dbContext.Users.AsNoTracking())
+                .Where(user => user.Active == "Y" && visibleUserIds.Contains(user.Id))
                 .OrderBy(x => x.Name)
                 .Select(x => new OptionDto { Id = x.Id, Name = x.Name })
                 .ToListAsync(cancellationToken),

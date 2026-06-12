@@ -42,7 +42,6 @@ public sealed class RedemptionsController : ControllerBase
         return File(file.Content, file.ContentType, file.FileName);
     }
 
-    [RequirePermission("redemption_access", "redemption_create")]
     [HttpGet("customers")]
     public async Task<IActionResult> GetCustomers([FromQuery] string? search, CancellationToken cancellationToken) =>
         Ok(await _service.GetCustomerOptionsAsync(search, CurrentUserId(), cancellationToken));

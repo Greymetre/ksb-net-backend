@@ -923,6 +923,15 @@ public sealed class MasterDataRepository : IMasterDataRepository
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<bool> DepartmentNameExistsAsync(string name, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        var normalized = name.Trim().ToLower();
+        return await _dbContext.Departments.AsNoTracking()
+            .AnyAsync(x => x.DeletedAt == null
+                && (!excludeId.HasValue || x.Id != excludeId.Value)
+                && x.Name.ToLower() == normalized, cancellationToken);
+    }
+
     public async Task<DepartmentDto> CreateDepartmentAsync(DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         var department = new Department

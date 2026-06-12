@@ -1,6 +1,5 @@
 using Application.DTOs.CityAssignments;
 using Application.Interfaces.Repositories;
-using Domain.Constants;
 using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
@@ -9,7 +8,6 @@ namespace Infrastructure.Repositories;
 
 public sealed class CityAssignmentRepository : ICityAssignmentRepository
 {
-    private const string DistributorRoleName = "Distributor";
     private const int MaxRows = 50000;
     private const int MaxOptionRows = 50000;
     private readonly AppDbContext _db;
@@ -81,10 +79,12 @@ public sealed class CityAssignmentRepository : ICityAssignmentRepository
             .ToListAsync(cancellationToken);
     }
 
-    public async Task<CityAssignmentOptionsDto> GetOptionsAsync(CancellationToken cancellationToken)
+    public async Task<CityAssignmentOptionsDto> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken)
     {
+        var visibleUserIds = await ReportingVisibility.GetVisibleUserIdsAsync(_db, actorUserId, cancellationToken);
         var users = await InternalUsersQuery(_db.Users.AsNoTracking())
             .Where(x => x.Active == "Y" && !x.IsDeleted)
+            .Where(x => visibleUserIds.Contains(x.Id))
             .OrderBy(x => x.Name)
             .Take(MaxOptionRows)
             .Select(x => new CityAssignmentOptionDto { Id = x.Id, Name = x.Name })
@@ -130,9 +130,5 @@ public sealed class CityAssignmentRepository : ICityAssignmentRepository
     public Task SaveChangesAsync(CancellationToken cancellationToken) => _db.SaveChangesAsync(cancellationToken);
 
     private IQueryable<User> InternalUsersQuery(IQueryable<User> query) =>
-        query.Where(user =>
-            !user.CustomerId.HasValue
-            && !_db.ModelHasRoles
-                .Join(_db.Roles, modelRole => modelRole.RoleId, role => role.Id, (modelRole, role) => new { modelRole, role })
-                .Any(x => x.modelRole.ModelId == user.Id && x.modelRole.ModelType == LaravelModelTypes.User && x.role.Name == DistributorRoleName));
+        ReportingVisibility.InternalUsersQuery(_db, query);
 }
