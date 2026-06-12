@@ -59,6 +59,7 @@ public sealed class CustomerRepository : ICustomerRepository
         var customers = rows.Select(row => ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName)).ToList();
         customers = ApplyJsonFilters(customers, filter).ToList();
         await AttachAddressNamesAsync(customers, cancellationToken);
+        await AttachLookupNamesAsync(customers, cancellationToken);
         return customers;
     }
 
@@ -77,6 +78,7 @@ public sealed class CustomerRepository : ICustomerRepository
         if (row is null) return null;
         var dto = ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName);
         await AttachAddressNamesAsync([dto], cancellationToken);
+        await AttachLookupNamesAsync([dto], cancellationToken);
         await AttachPointSummaryAsync(dto, row.Customer, cancellationToken);
         return dto;
     }
@@ -342,6 +344,46 @@ public sealed class CustomerRepository : ICustomerRepository
         }
     }
 
+    private async Task AttachLookupNamesAsync(IReadOnlyCollection<CustomerDto> customers, CancellationToken cancellationToken)
+    {
+        var distributorIds = customers
+            .SelectMany(customer => new[] { ReadULong(customer.CustomFields, "distributor_name"), ReadULong(customer.CustomFields, "agri_distributor") })
+            .Where(id => id.HasValue)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToArray();
+
+        var userIds = customers
+            .SelectMany(customer => new[] { "employee_id", "sales_executive_id", "supervisor_id" }
+                .SelectMany(key => ReadULongs(ReadField(customer.CustomFields, key))))
+            .Distinct()
+            .ToArray();
+
+        var distributors = await _dbContext.Customers.AsNoTracking()
+            .Where(customer => distributorIds.Contains(customer.Id))
+            .Select(customer => new
+            {
+                customer.Id,
+                customer.Name,
+                customer.CustomerCode,
+                customer.CustomFields
+            })
+            .ToDictionaryAsync(customer => customer.Id, customer => DistributorDisplayName(customer.CustomerCode, customer.Name, DeserializeFields(customer.CustomFields)), cancellationToken);
+
+        var users = await _dbContext.Users.AsNoTracking()
+            .Where(user => userIds.Contains(user.Id))
+            .ToDictionaryAsync(user => user.Id, user => user.Name, cancellationToken);
+
+        foreach (var customer in customers)
+        {
+            SetCustomerLookupName(customer.CustomFields, "distributor_name", distributors);
+            SetCustomerLookupName(customer.CustomFields, "agri_distributor", distributors);
+            SetUserLookupName(customer.CustomFields, "employee_id", users);
+            SetUserLookupName(customer.CustomFields, "sales_executive_id", users);
+            SetUserLookupName(customer.CustomFields, "supervisor_id", users);
+        }
+    }
+
     private async Task AttachPointSummaryAsync(CustomerDto customerDto, Customer customer, CancellationToken cancellationToken)
     {
         var rows = await (from invoice in _dbContext.NewInvoices.AsNoTracking()
@@ -577,6 +619,54 @@ public sealed class CustomerRepository : ICustomerRepository
 
         first = first.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? first;
         return ulong.TryParse(first, out var parsed) ? parsed : null;
+    }
+
+    private static ulong[] ReadULongs(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return [];
+        var trimmed = value.Trim();
+        if (trimmed.StartsWith("[", StringComparison.Ordinal))
+        {
+            try
+            {
+                return JsonSerializer.Deserialize<List<ulong>>(trimmed, JsonOptions)?.Where(id => id > 0).ToArray() ?? [];
+            }
+            catch
+            {
+                return [];
+            }
+        }
+
+        return trimmed
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(item => ulong.TryParse(item, out var parsed) ? parsed : 0)
+            .Where(id => id > 0)
+            .ToArray();
+    }
+
+    private static void SetCustomerLookupName(Dictionary<string, string?> fields, string key, IReadOnlyDictionary<ulong, string> names)
+    {
+        var id = ReadULong(fields, key);
+        if (id.HasValue && names.TryGetValue(id.Value, out var name)) fields[$"{key}_name"] = name;
+    }
+
+    private static void SetUserLookupName(Dictionary<string, string?> fields, string key, IReadOnlyDictionary<ulong, string> names)
+    {
+        var values = ReadULongs(ReadField(fields, key));
+        if (values.Length == 0) return;
+
+        var labels = values
+            .Select(id => names.TryGetValue(id, out var name) ? name : null)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .ToArray();
+
+        if (labels.Length > 0) fields[$"{key}_name"] = string.Join(", ", labels);
+    }
+
+    private static string DistributorDisplayName(string? customerCode, string name, IReadOnlyDictionary<string, string?> fields)
+    {
+        var legalName = FirstNonBlank(ReadField(fields, "legal_name"), ReadField(fields, "shop_name"), name) ?? name;
+        return string.Join(" - ", new[] { customerCode, legalName }.Where(value => !string.IsNullOrWhiteSpace(value)));
     }
 
     private static string? NormalizeText(string? value)

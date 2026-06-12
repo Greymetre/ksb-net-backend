@@ -301,11 +301,6 @@ namespace Infrastructure.Migrations
                         .HasColumnType("bigint unsigned")
                         .HasColumnName("updated_by");
 
-                    b.Property<string>("WarehouseId")
-                        .HasMaxLength(125)
-                        .HasColumnType("varchar(125)")
-                        .HasColumnName("warehouse_id");
-
                     b.HasKey("Id");
 
                     b.HasIndex("BranchName");

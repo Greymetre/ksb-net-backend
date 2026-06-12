@@ -121,7 +121,6 @@ public sealed class BranchConfiguration : IEntityTypeConfiguration<Branch>
         builder.Property(x => x.Active).HasColumnName("active").HasMaxLength(1).HasDefaultValue("Y");
         builder.Property(x => x.BranchName).HasColumnName("branch_name").HasMaxLength(250);
         builder.Property(x => x.BranchCode).HasColumnName("branch_code").HasMaxLength(125);
-        builder.Property(x => x.WarehouseId).HasColumnName("warehouse_id").HasMaxLength(125);
         builder.Property(x => x.CreatedBy).HasColumnName("created_by");
         builder.Property(x => x.UpdatedBy).HasColumnName("updated_by");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");

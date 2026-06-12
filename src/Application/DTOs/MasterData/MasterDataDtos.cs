@@ -67,7 +67,6 @@ public sealed class BranchDto
     public ulong Id { get; set; }
     public string BranchName { get; set; } = string.Empty;
     public string? BranchCode { get; set; }
-    public string? WarehouseId { get; set; }
     public string Active { get; set; } = "Y";
     public ulong? CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
@@ -108,7 +107,6 @@ public sealed class BranchRequestDto
 {
     public string? BranchName { get; set; }
     public string? BranchCode { get; set; }
-    public string? WarehouseId { get; set; }
     public string? Active { get; set; }
 }
 

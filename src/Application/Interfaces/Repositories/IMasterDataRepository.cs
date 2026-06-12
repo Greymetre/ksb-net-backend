@@ -42,6 +42,7 @@ public interface IMasterDataRepository
     Task<IReadOnlyCollection<BranchDto>> GetBranchesAsync(string? search, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<BranchDto>> ExportBranchesAsync(CancellationToken cancellationToken);
     Task<BranchDto?> GetBranchAsync(ulong id, CancellationToken cancellationToken);
+    Task<bool> BranchNameExistsAsync(string branchName, ulong? excludeId, CancellationToken cancellationToken);
     Task<BranchDto> CreateBranchAsync(BranchRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<BranchDto?> UpdateBranchAsync(ulong id, BranchRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<BranchDto?> SetBranchActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken);
@@ -49,6 +50,7 @@ public interface IMasterDataRepository
     Task<IReadOnlyCollection<DivisionDto>> GetDivisionsAsync(string? search, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<DivisionDto>> ExportDivisionsAsync(CancellationToken cancellationToken);
     Task<DivisionDto?> GetDivisionAsync(ulong id, CancellationToken cancellationToken);
+    Task<bool> DivisionNameExistsAsync(string divisionName, ulong? excludeId, CancellationToken cancellationToken);
     Task<DivisionDto> CreateDivisionAsync(DivisionRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DivisionDto?> UpdateDivisionAsync(ulong id, DivisionRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DivisionDto?> SetDivisionActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken);
@@ -56,6 +58,7 @@ public interface IMasterDataRepository
     Task<IReadOnlyCollection<DesignationDto>> GetDesignationsAsync(string? search, CancellationToken cancellationToken);
     Task<IReadOnlyCollection<DesignationDto>> ExportDesignationsAsync(CancellationToken cancellationToken);
     Task<DesignationDto?> GetDesignationAsync(ulong id, CancellationToken cancellationToken);
+    Task<bool> DesignationNameExistsAsync(string designationName, ulong? excludeId, CancellationToken cancellationToken);
     Task<DesignationDto> CreateDesignationAsync(DesignationRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DesignationDto?> UpdateDesignationAsync(ulong id, DesignationRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DesignationDto?> SetDesignationActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken);

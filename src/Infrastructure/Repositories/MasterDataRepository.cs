@@ -572,7 +572,6 @@ public sealed class MasterDataRepository : IMasterDataRepository
                 Id = x.Id,
                 BranchName = x.BranchName,
                 BranchCode = x.BranchCode,
-                WarehouseId = x.WarehouseId,
                 Active = x.Active,
                 CreatedBy = x.CreatedBy,
                 CreatedByName = _dbContext.Users.Where(user => user.Id == x.CreatedBy).Select(user => user.Name).FirstOrDefault(),
@@ -593,13 +592,21 @@ public sealed class MasterDataRepository : IMasterDataRepository
                 Id = x.Id,
                 BranchName = x.BranchName,
                 BranchCode = x.BranchCode,
-                WarehouseId = x.WarehouseId,
                 Active = x.Active,
                 CreatedBy = x.CreatedBy,
                 CreatedByName = _dbContext.Users.Where(user => user.Id == x.CreatedBy).Select(user => user.Name).FirstOrDefault(),
                 CreatedAt = x.CreatedAt
             })
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<bool> BranchNameExistsAsync(string branchName, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        var normalized = branchName.Trim().ToLower();
+        return await _dbContext.Branches.AsNoTracking()
+            .AnyAsync(x => x.DeletedAt == null
+                && (!excludeId.HasValue || x.Id != excludeId.Value)
+                && x.BranchName.ToLower() == normalized, cancellationToken);
     }
 
     public async Task<BranchDto> CreateBranchAsync(BranchRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
@@ -609,7 +616,6 @@ public sealed class MasterDataRepository : IMasterDataRepository
             Active = NormalizeActive(request.Active) ?? "Y",
             BranchName = request.BranchName!.Trim(),
             BranchCode = NormalizeText(request.BranchCode),
-            WarehouseId = NormalizeText(request.WarehouseId),
             CreatedBy = actorUserId,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -627,7 +633,6 @@ public sealed class MasterDataRepository : IMasterDataRepository
 
         if (!string.IsNullOrWhiteSpace(request.BranchName)) branch.BranchName = request.BranchName.Trim();
         if (request.BranchCode is not null) branch.BranchCode = NormalizeText(request.BranchCode);
-        if (request.WarehouseId is not null) branch.WarehouseId = NormalizeText(request.WarehouseId);
         var active = NormalizeActive(request.Active);
         if (active is not null) branch.Active = active;
         branch.UpdatedBy = actorUserId;
@@ -702,6 +707,15 @@ public sealed class MasterDataRepository : IMasterDataRepository
                 CreatedAt = x.CreatedAt
             })
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<bool> DivisionNameExistsAsync(string divisionName, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        var normalized = divisionName.Trim().ToLower();
+        return await _dbContext.Divisions.AsNoTracking()
+            .AnyAsync(x => x.DeletedAt == null
+                && (!excludeId.HasValue || x.Id != excludeId.Value)
+                && x.DivisionName.ToLower() == normalized, cancellationToken);
     }
 
     public async Task<DivisionDto> CreateDivisionAsync(DivisionRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
@@ -800,6 +814,15 @@ public sealed class MasterDataRepository : IMasterDataRepository
                 CreatedAt = x.CreatedAt
             })
             .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    public async Task<bool> DesignationNameExistsAsync(string designationName, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        var normalized = designationName.Trim().ToLower();
+        return await _dbContext.Designations.AsNoTracking()
+            .AnyAsync(x => x.DeletedAt == null
+                && (!excludeId.HasValue || x.Id != excludeId.Value)
+                && x.DesignationName.ToLower() == normalized, cancellationToken);
     }
 
     public async Task<DesignationDto> CreateDesignationAsync(DesignationRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
@@ -1101,7 +1124,6 @@ public sealed class MasterDataRepository : IMasterDataRepository
         Id = branch.Id,
         BranchName = branch.BranchName,
         BranchCode = branch.BranchCode,
-        WarehouseId = branch.WarehouseId,
         Active = branch.Active,
         CreatedBy = branch.CreatedBy,
         CreatedAt = branch.CreatedAt

@@ -354,8 +354,8 @@ public sealed class MasterDataService : IMasterDataService
         var rows = await _repository.ExportBranchesAsync(cancellationToken);
         return CreateWorkbook(
             "branch.xlsx",
-            ["id", "branch_name", "branch_code", "warehouse_id", "active", "created_by", "created_at"],
-            rows.Select(x => new object?[] { x.Id, x.BranchName, x.BranchCode, x.WarehouseId, x.Active, x.CreatedBy, x.CreatedAt }));
+            ["id", "branch_name", "branch_code", "active", "created_by", "created_at"],
+            rows.Select(x => new object?[] { x.Id, x.BranchName, x.BranchCode, x.Active, x.CreatedBy, x.CreatedAt }));
     }
 
     public async Task<LaravelApiResponse> GetBranchAsync(ulong id, CancellationToken cancellationToken) =>
@@ -364,11 +364,14 @@ public sealed class MasterDataService : IMasterDataService
     public async Task<LaravelApiResponse> CreateBranchAsync(BranchRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         RequireValue(request.BranchName, "Branch name is required.");
+        await RequireUniqueBranchNameAsync(request.BranchName!, null, cancellationToken);
         return LaravelApiResponse.Success("branch", await _repository.CreateBranchAsync(request, actorUserId, cancellationToken), "Branch Store Successfully");
     }
 
     public async Task<LaravelApiResponse> UpdateBranchAsync(ulong id, BranchRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        if (await _repository.GetBranchAsync(id, cancellationToken) is null) throw NotFound("Branch not found");
+        if (!string.IsNullOrWhiteSpace(request.BranchName)) await RequireUniqueBranchNameAsync(request.BranchName, id, cancellationToken);
         var branch = await _repository.UpdateBranchAsync(id, request, actorUserId, cancellationToken);
         return LaravelApiResponse.Success("branch", branch ?? throw NotFound("Branch not found"), "Branch updated successfully");
     }
@@ -403,11 +406,14 @@ public sealed class MasterDataService : IMasterDataService
     public async Task<LaravelApiResponse> CreateDivisionAsync(DivisionRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         RequireValue(request.DivisionName, "Division name is required.");
+        await RequireUniqueDivisionNameAsync(request.DivisionName!, null, cancellationToken);
         return LaravelApiResponse.Success("division", await _repository.CreateDivisionAsync(request, actorUserId, cancellationToken), "Division Store Successfully");
     }
 
     public async Task<LaravelApiResponse> UpdateDivisionAsync(ulong id, DivisionRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        if (await _repository.GetDivisionAsync(id, cancellationToken) is null) throw NotFound("Division not found");
+        if (!string.IsNullOrWhiteSpace(request.DivisionName)) await RequireUniqueDivisionNameAsync(request.DivisionName, id, cancellationToken);
         var division = await _repository.UpdateDivisionAsync(id, request, actorUserId, cancellationToken);
         return LaravelApiResponse.Success("division", division ?? throw NotFound("Division not found"), "Division updated successfully");
     }
@@ -442,11 +448,14 @@ public sealed class MasterDataService : IMasterDataService
     public async Task<LaravelApiResponse> CreateDesignationAsync(DesignationRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         RequireValue(request.DesignationName, "Designation name is required.");
+        await RequireUniqueDesignationNameAsync(request.DesignationName!, null, cancellationToken);
         return LaravelApiResponse.Success("designation", await _repository.CreateDesignationAsync(request, actorUserId, cancellationToken), "Designation Store Successfully");
     }
 
     public async Task<LaravelApiResponse> UpdateDesignationAsync(ulong id, DesignationRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
+        if (await _repository.GetDesignationAsync(id, cancellationToken) is null) throw NotFound("Designation not found");
+        if (!string.IsNullOrWhiteSpace(request.DesignationName)) await RequireUniqueDesignationNameAsync(request.DesignationName, id, cancellationToken);
         var designation = await _repository.UpdateDesignationAsync(id, request, actorUserId, cancellationToken);
         return LaravelApiResponse.Success("designation", designation ?? throw NotFound("Designation not found"), "Designation updated successfully");
     }
@@ -607,7 +616,7 @@ public sealed class MasterDataService : IMasterDataService
     {
         if (value is not string text || string.IsNullOrWhiteSpace(text)) return value;
         var normalized = NormalizeHeading(heading);
-        if (normalized is "id" or "country_id" or "state_id" or "district_id" or "city_id" or "pincode" or "gst_code" or "branch_code" or "warehouse_id" or "active" or "created_at") return value;
+        if (normalized is "id" or "country_id" or "state_id" or "district_id" or "city_id" or "pincode" or "gst_code" or "branch_code" or "active" or "created_at") return value;
         return ToTitleCase(text);
     }
 
@@ -677,6 +686,33 @@ public sealed class MasterDataService : IMasterDataService
             throw NotFound("City not found");
         }
     }
+
+    private async Task RequireUniqueBranchNameAsync(string branchName, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        if (await _repository.BranchNameExistsAsync(branchName, excludeId, cancellationToken))
+        {
+            throw BadRequest("Branch name already exists.");
+        }
+    }
+
+    private async Task RequireUniqueDivisionNameAsync(string divisionName, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        if (await _repository.DivisionNameExistsAsync(divisionName, excludeId, cancellationToken))
+        {
+            throw BadRequest("Zone name already exists.");
+        }
+    }
+
+    private async Task RequireUniqueDesignationNameAsync(string designationName, ulong? excludeId, CancellationToken cancellationToken)
+    {
+        if (await _repository.DesignationNameExistsAsync(designationName, excludeId, cancellationToken))
+        {
+            throw BadRequest("Designation name already exists.");
+        }
+    }
+
+    private static LaravelHttpException BadRequest(string message) =>
+        new(LaravelStatusCodes.BadRequest, message);
 
     private static LaravelHttpException NotFound(string message) =>
         new(LaravelStatusCodes.NotFound, message);

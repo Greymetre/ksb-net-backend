@@ -89,7 +89,7 @@ public sealed class SimpleApiDescriptionFilter : IOperationFilter
             "CreateRole" or "UpdateRole" => "Send role name, optional guard_name, and optional permission IDs.",
             "SyncRolePermissions" => "Send permission IDs that should be assigned to this role. Existing role permissions are replaced.",
             "SaveRolePermissions" => "Send permissions grouped by role ID, matching the Laravel role permission matrix.",
-            "CreateBranch" or "UpdateBranch" => "Send branch_name and optional branch_code, warehouse_id, and active status.",
+            "CreateBranch" or "UpdateBranch" => "Send branch_name and optional branch_code and active status.",
             "CreateDivision" or "UpdateDivision" => "Send division_name and optional active status.",
             "CreateDesignation" or "UpdateDesignation" => "Send designation_name and optional active status.",
             "CreateDepartment" or "UpdateDepartment" => "Send name and optional active status.",
