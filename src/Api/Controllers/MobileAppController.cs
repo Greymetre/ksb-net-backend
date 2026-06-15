@@ -227,6 +227,7 @@ public sealed class MobileAppController : ControllerBase
         if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
         var invoices = await CustomerInvoices(customer.Id, cancellationToken);
         var wallet = await BuildWallet(customer.Id, invoices, cancellationToken);
+        var walletCards = await BuildDashboardWalletCards(customer, wallet, invoices, cancellationToken);
         var pendingInvoices = invoices.Count(x => x.ApprovalStatus != NewInvoice.StatusApprovedHo && x.ApprovalStatus != NewInvoice.StatusRejected);
 
         return Ok(new
@@ -242,6 +243,8 @@ public sealed class MobileAppController : ControllerBase
                 total_invoice_value = invoices.Where(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo).GroupBy(x => x.Id).Sum(x => x.First().Amount),
                 slab_wallet = wallet.Regular.AvailablePoints,
                 booster_wallet = wallet.Booster.AvailablePoints,
+                active_wallets = walletCards.Count(x => x.IsActive),
+                wallets = walletCards,
                 recent_invoices = invoices.OrderByDescending(x => x.InvoiceDate).Take(5)
             }
         });
@@ -420,6 +423,170 @@ public sealed class MobileAppController : ControllerBase
         return new WalletDto(walletType, schemeRows.Sum(x => x.EarnedPoints), schemeRows.Sum(x => x.RedeemedPoints), schemeRows.Sum(x => x.AvailablePoints), schemeRows);
     }
 
+    private async Task<IReadOnlyCollection<DashboardWalletCardDto>> BuildDashboardWalletCards(Customer customer, WalletPair wallet, IReadOnlyCollection<NewInvoiceDto> invoices, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var schemes = await _dbContext.LoyaltySchemes.AsNoTracking()
+            .Include(x => x.Slabs)
+            .Where(x => x.DeletedAt == null
+                && x.Active == "Y"
+                && x.Status == "Live"
+                && x.SchemeType == "Invoice"
+                && x.StartDate <= today
+                && x.EndDate >= today)
+            .ToListAsync(cancellationToken);
+
+        var regularScheme = schemes
+            .Where(x => !IsBooster(x.SchemeTag) && SchemeCustomerTypeMatches(x.CustomerType, customer.CustomerType))
+            .OrderBy(x => x.EndDate)
+            .ThenBy(x => x.SchemeName)
+            .FirstOrDefault();
+
+        var boosterScheme = schemes
+            .Where(x => IsBooster(x.SchemeTag) && SchemeCustomerTypeMatches(x.CustomerType, customer.CustomerType))
+            .OrderBy(x => x.EndDate)
+            .ThenBy(x => x.SchemeName)
+            .FirstOrDefault();
+
+        return
+        [
+            BuildRegularWalletCard(regularScheme, wallet.Regular, invoices, today),
+            BuildBoosterWalletCard(boosterScheme, wallet.Booster, invoices, today)
+        ];
+    }
+
+    private static DashboardWalletCardDto BuildRegularWalletCard(LoyaltyScheme? scheme, WalletDto wallet, IReadOnlyCollection<NewInvoiceDto> invoices, DateOnly today)
+    {
+        var approvedInvoices = invoices
+            .Where(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToList();
+
+        if (scheme is null)
+        {
+            return new DashboardWalletCardDto
+            {
+                Key = "slab",
+                Title = "Slab Wallet",
+                WalletType = "Regular",
+                Points = wallet.AvailablePoints,
+                IsActive = false,
+                ExpiryLabel = "No active scheme",
+                NextMessage = "No active slab scheme available.",
+                DaysLeftMessage = "No active slab scheme available."
+            };
+        }
+
+        var start = scheme.StartDate.ToDateTime(TimeOnly.MinValue);
+        var end = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
+        var invoiceAmount = approvedInvoices
+            .Where(x => x.InvoiceDate >= start && x.InvoiceDate <= end)
+            .Sum(x => x.Amount);
+        var slabs = scheme.Slabs
+            .OrderBy(x => x.ValueFrom)
+            .ThenBy(x => x.SortOrder)
+            .ToList();
+        var achieved = slabs.LastOrDefault(x => invoiceAmount >= x.ValueFrom && (!x.ValueTo.HasValue || invoiceAmount <= x.ValueTo.Value))
+            ?? slabs.LastOrDefault(x => invoiceAmount >= x.ValueFrom);
+        var next = slabs.FirstOrDefault(x => invoiceAmount < x.ValueFrom);
+        var daysLeft = Math.Max(0, (scheme.EndDate.ToDateTime(TimeOnly.MinValue).Date - DateTime.UtcNow.Date).Days);
+        var amountMore = next is null ? 0 : Math.Max(0, next.ValueFrom - invoiceAmount);
+
+        return new DashboardWalletCardDto
+        {
+            Key = "slab",
+            Title = "Slab Wallet",
+            WalletType = "Regular",
+            SchemeId = scheme.Id,
+            SchemeName = scheme.SchemeName,
+            SchemeCode = scheme.SchemeCode,
+            SchemeTag = scheme.SchemeTag,
+            BasedOn = scheme.BasedOn,
+            Points = wallet.AvailablePoints,
+            EarnedPoints = wallet.EarnedPoints,
+            RedeemedPoints = wallet.RedeemedPoints,
+            InvoiceAmount = invoiceAmount,
+            InvoiceAmountShort = FormatIndianShortAmount(invoiceAmount),
+            AchievedReward = achieved?.RewardValue ?? 0,
+            AchievedLabel = achieved is null ? "0" : FormatReward(achieved.RewardValue, scheme.BasedOn),
+            AchievedTierName = achieved?.TierName,
+            NextReward = next?.RewardValue,
+            NextRewardLabel = next is null ? null : FormatReward(next.RewardValue, scheme.BasedOn),
+            NextTierName = next?.TierName,
+            AmountMoreForNextSlab = amountMore,
+            NextMessage = next is null
+                ? "Highest slab achieved."
+                : $"{FormatIndianCurrency(amountMore)} more for {FormatReward(next.RewardValue, scheme.BasedOn)} slab",
+            DaysLeft = daysLeft,
+            DaysLeftMessage = daysLeft == 1 ? "You have 1 day left to reach it" : $"You have {daysLeft} days left to reach it",
+            StartDate = scheme.StartDate,
+            EndDate = scheme.EndDate,
+            ExpiresOn = scheme.EndDate.ToString("dd MMM"),
+            ExpiryLabel = $"Expires {scheme.EndDate:dd MMM} · Quarterly",
+            BadgeText = daysLeft == 1 ? "1D LEFT" : $"{daysLeft}D LEFT",
+            IsActive = true,
+            ProgressSteps = slabs.Select(slab => new DashboardSlabStepDto
+            {
+                Id = slab.Id,
+                TierName = slab.TierName,
+                ValueFrom = slab.ValueFrom,
+                ValueTo = slab.ValueTo,
+                RewardValue = slab.RewardValue,
+                RewardLabel = FormatReward(slab.RewardValue, scheme.BasedOn),
+                Achieved = invoiceAmount >= slab.ValueFrom,
+                Current = achieved?.Id == slab.Id
+            }).ToList(),
+            ProgressIndex = achieved is null ? -1 : slabs.FindIndex(x => x.Id == achieved.Id),
+            ProgressPercent = slabs.Count == 0 ? 0 : Math.Clamp((decimal)(achieved is null ? 0 : slabs.FindIndex(x => x.Id == achieved.Id) + 1) / slabs.Count * 100, 0, 100)
+        };
+    }
+
+    private static DashboardWalletCardDto BuildBoosterWalletCard(LoyaltyScheme? scheme, WalletDto wallet, IReadOnlyCollection<NewInvoiceDto> invoices, DateOnly today)
+    {
+        var approvedInvoices = invoices
+            .Where(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo)
+            .GroupBy(x => x.Id)
+            .Select(x => x.First())
+            .ToList();
+        var invoiceAmount = approvedInvoices.Sum(x => x.Amount);
+
+        return new DashboardWalletCardDto
+        {
+            Key = "booster",
+            Title = "Booster Wallet",
+            WalletType = "Booster",
+            SchemeId = scheme?.Id,
+            SchemeName = scheme?.SchemeName,
+            SchemeCode = scheme?.SchemeCode,
+            SchemeTag = scheme?.SchemeTag ?? "Booster",
+            BasedOn = scheme?.BasedOn,
+            Points = wallet.AvailablePoints,
+            EarnedPoints = wallet.EarnedPoints,
+            RedeemedPoints = wallet.RedeemedPoints,
+            InvoiceAmount = invoiceAmount,
+            InvoiceAmountShort = FormatIndianShortAmount(invoiceAmount),
+            StartDate = scheme?.StartDate,
+            EndDate = scheme?.EndDate,
+            ExpiresOn = scheme?.EndDate.ToString("dd MMM"),
+            ExpiryLabel = "Lifetime · Never expires",
+            BadgeText = "FOREVER",
+            IsActive = scheme is not null,
+            NextMessage = scheme is null ? "No active booster scheme available." : null,
+            DaysLeft = scheme is null ? null : Math.Max(0, (scheme.EndDate.ToDateTime(TimeOnly.MinValue).Date - DateTime.UtcNow.Date).Days),
+            ProgressSteps = scheme?.Slabs.OrderBy(x => x.ValueFrom).ThenBy(x => x.SortOrder).Select(slab => new DashboardSlabStepDto
+            {
+                Id = slab.Id,
+                TierName = slab.TierName,
+                ValueFrom = slab.ValueFrom,
+                ValueTo = slab.ValueTo,
+                RewardValue = slab.RewardValue,
+                RewardLabel = FormatReward(slab.RewardValue, scheme.BasedOn),
+                Achieved = invoiceAmount >= slab.ValueFrom
+            }).ToList() ?? []
+        };
+    }
+
     private async Task<object> LiveSchemes(string? walletType, CancellationToken cancellationToken)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -582,6 +749,38 @@ public sealed class MobileAppController : ControllerBase
 
     private static bool IsBooster(string? schemeTag) => string.Equals(schemeTag, "Booster", StringComparison.OrdinalIgnoreCase);
 
+    private static bool SchemeCustomerTypeMatches(string customerType, ulong? actualCustomerType)
+    {
+        if (actualCustomerType == RetailerType)
+        {
+            return customerType.Contains("Retailer", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (actualCustomerType == InfluencerType)
+        {
+            return customerType.Contains("Influencer", StringComparison.OrdinalIgnoreCase)
+                || customerType.Contains("Plumber", StringComparison.OrdinalIgnoreCase)
+                || customerType.Contains("Sub-Dealer", StringComparison.OrdinalIgnoreCase)
+                || customerType.Contains("Sub Dealer", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return false;
+    }
+
+    private static string FormatReward(decimal value, string? basedOn) =>
+        string.Equals(basedOn, "Percentage", StringComparison.OrdinalIgnoreCase) ? $"{value:0.##}%" : $"Rs. {value:0.##}";
+
+    private static string FormatIndianCurrency(decimal value) => $"₹{value:N0}";
+
+    private static string FormatIndianShortAmount(decimal value)
+    {
+        var absolute = Math.Abs(value);
+        if (absolute >= 10000000) return $"₹{value / 10000000:0.##}Cr";
+        if (absolute >= 100000) return $"₹{value / 100000:0.##}L";
+        if (absolute >= 1000) return $"₹{value / 1000:0.##}K";
+        return $"₹{value:0.##}";
+    }
+
     private static string DisplayName(Customer customer) => Field(ReadFields(customer), "owner_name") ?? customer.FirstName ?? customer.Name;
 
     private static string Mask(string value) => value.Length <= 4 ? value : $"{new string('X', Math.Max(0, value.Length - 4))}{value[^4..]}";
@@ -671,4 +870,52 @@ public sealed class MobileAppController : ControllerBase
     private sealed record WalletPair(WalletDto Regular, WalletDto Booster);
     private sealed record WalletDto(string WalletType, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints, IReadOnlyCollection<WalletSchemeDto> Schemes);
     private sealed record WalletSchemeDto(ulong? SchemeId, string SchemeName, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints);
+
+    private sealed class DashboardWalletCardDto
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string WalletType { get; set; } = string.Empty;
+        public ulong? SchemeId { get; set; }
+        public string? SchemeName { get; set; }
+        public string? SchemeCode { get; set; }
+        public string? SchemeTag { get; set; }
+        public string? BasedOn { get; set; }
+        public decimal Points { get; set; }
+        public decimal EarnedPoints { get; set; }
+        public decimal RedeemedPoints { get; set; }
+        public decimal InvoiceAmount { get; set; }
+        public string InvoiceAmountShort { get; set; } = "₹0";
+        public decimal AchievedReward { get; set; }
+        public string? AchievedLabel { get; set; }
+        public string? AchievedTierName { get; set; }
+        public decimal? NextReward { get; set; }
+        public string? NextRewardLabel { get; set; }
+        public string? NextTierName { get; set; }
+        public decimal AmountMoreForNextSlab { get; set; }
+        public string? NextMessage { get; set; }
+        public int? DaysLeft { get; set; }
+        public string? DaysLeftMessage { get; set; }
+        public DateOnly? StartDate { get; set; }
+        public DateOnly? EndDate { get; set; }
+        public string? ExpiresOn { get; set; }
+        public string ExpiryLabel { get; set; } = string.Empty;
+        public string BadgeText { get; set; } = string.Empty;
+        public bool IsActive { get; set; }
+        public int ProgressIndex { get; set; } = -1;
+        public decimal ProgressPercent { get; set; }
+        public IReadOnlyCollection<DashboardSlabStepDto> ProgressSteps { get; set; } = [];
+    }
+
+    private sealed class DashboardSlabStepDto
+    {
+        public ulong Id { get; set; }
+        public string TierName { get; set; } = string.Empty;
+        public decimal ValueFrom { get; set; }
+        public decimal? ValueTo { get; set; }
+        public decimal RewardValue { get; set; }
+        public string RewardLabel { get; set; } = string.Empty;
+        public bool Achieved { get; set; }
+        public bool Current { get; set; }
+    }
 }
