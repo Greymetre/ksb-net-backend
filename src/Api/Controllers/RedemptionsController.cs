@@ -46,11 +46,18 @@ public sealed class RedemptionsController : ControllerBase
     public async Task<IActionResult> GetCustomers([FromQuery] string? search, CancellationToken cancellationToken) =>
         Ok(await _service.GetCustomerOptionsAsync(search, CurrentUserId(), cancellationToken));
 
-    [RequirePermission("redemption_create")]
     [HttpPost]
     public async Task<IActionResult> CreateRedemption([FromBody] RedemptionCreateRequestDto request, CancellationToken cancellationToken)
     {
-        var response = await _service.CreateRedemptionAsync(request, CurrentUserId(), cancellationToken);
+        var currentUserId = CurrentUserId();
+        if (string.Equals(User.FindFirstValue("provider"), "customers", StringComparison.OrdinalIgnoreCase)
+            && request.CustomerId == 0
+            && currentUserId.HasValue)
+        {
+            request.CustomerId = currentUserId.Value;
+        }
+
+        var response = await _service.CreateRedemptionAsync(request, currentUserId, cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
     }
 

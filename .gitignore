@@ -41,3 +41,6 @@ api-verify/
 # OS generated files
 Thumbs.db
 Desktop.ini
+
+# Postman collections and environments
+/postman/
