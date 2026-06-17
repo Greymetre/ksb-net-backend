@@ -514,14 +514,14 @@ public sealed class MasterDataService : IMasterDataService
         return LaravelApiResponse.MessageOnly("success", "Department deleted successfully!");
     }
 
-    public async Task<LaravelApiResponse> GetLocationDetailsAsync(string? pincode, ulong? cityId, string? city, CancellationToken cancellationToken)
+    public async Task<LaravelApiResponse> GetLocationDetailsAsync(string? pincode, ulong? stateId, ulong? cityId, string? city, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(pincode) && cityId is null && string.IsNullOrWhiteSpace(city))
+        if (string.IsNullOrWhiteSpace(pincode) && stateId is null && cityId is null && string.IsNullOrWhiteSpace(city))
         {
-            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Please provide pincode, city_id, or city.");
+            throw new LaravelHttpException(LaravelStatusCodes.BadRequest, "Please provide pincode, state_id, city_id, or city.");
         }
 
-        var details = await _repository.GetLocationDetailsAsync(pincode, cityId, city, cancellationToken);
+        var details = await _repository.GetLocationDetailsAsync(pincode, stateId, cityId, city, cancellationToken);
         return LaravelApiResponse.Success("locations", details);
     }
 

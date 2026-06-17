@@ -11,7 +11,13 @@ public sealed class AppDbContextFactory : IDesignTimeDbContextFactory<AppDbConte
         var connectionString = Environment.GetEnvironmentVariable("KSB_PR_CONNECTION")
             ?? "Server=127.0.0.1;Port=3306;Database=netksb_new;User=root;Password=;";
 
-        optionsBuilder.UseMySql(connectionString, new MySqlServerVersion(new Version(8, 0, 36)));
+        optionsBuilder.UseMySql(
+            connectionString,
+            new MySqlServerVersion(new Version(8, 0, 36)),
+            mySqlOptions => mySqlOptions.EnableRetryOnFailure(
+                maxRetryCount: 5,
+                maxRetryDelay: TimeSpan.FromSeconds(10),
+                errorNumbersToAdd: null));
         return new AppDbContext(optionsBuilder.Options);
     }
 }

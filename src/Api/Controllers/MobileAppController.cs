@@ -1,4 +1,5 @@
 using System.IdentityModel.Tokens.Jwt;
+using System.Globalization;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -21,13 +22,15 @@ public sealed class MobileAppController : ControllerBase
     private const ulong InfluencerType = 3;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _dbContext;
+    private readonly IMasterDataService _masterDataService;
     private readonly INewInvoiceRepository _invoiceRepository;
     private readonly ITokenService _tokenService;
     private readonly IWebHostEnvironment _environment;
 
-    public MobileAppController(AppDbContext dbContext, INewInvoiceRepository invoiceRepository, ITokenService tokenService, IWebHostEnvironment environment)
+    public MobileAppController(AppDbContext dbContext, IMasterDataService masterDataService, INewInvoiceRepository invoiceRepository, ITokenService tokenService, IWebHostEnvironment environment)
     {
         _dbContext = dbContext;
+        _masterDataService = masterDataService;
         _invoiceRepository = invoiceRepository;
         _tokenService = tokenService;
         _environment = environment;
@@ -160,7 +163,18 @@ public sealed class MobileAppController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("retailer/kyc")]
+    public async Task<IActionResult> GetKyc(CancellationToken cancellationToken)
+    {
+        var customer = await CurrentCustomer(cancellationToken);
+        if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
+
+        return Ok(new { status = "success", data = BuildMobileKyc(customer, ReadFields(customer)) });
+    }
+
+    [Authorize]
     [HttpPost("retailer/kyc")]
+    [HttpPut("retailer/kyc")]
     [Consumes("multipart/form-data")]
     public async Task<IActionResult> UploadKyc(CancellationToken cancellationToken)
     {
@@ -168,22 +182,42 @@ public sealed class MobileAppController : ControllerBase
         if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
 
         var fields = ReadFields(customer);
+        var changedDocuments = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var formField in Request.Form)
         {
-            fields[formField.Key] = formField.Value.ToString();
+            var key = formField.Key;
+            var value = formField.Value.ToString();
+            if (string.Equals(Field(fields, key), value, StringComparison.Ordinal)) continue;
+
+            fields[key] = value;
+            var documentKey = KycDocumentKeyForDetail(key);
+            if (!string.IsNullOrWhiteSpace(documentKey)) changedDocuments.Add(documentKey);
         }
 
         foreach (var file in Request.Form.Files)
         {
+            if (file.Length == 0) continue;
+
             var key = KycAttachmentKey(file.Name);
             fields[key] = await SaveFileAsync(file, "customer-kyc", cancellationToken);
-            fields[$"{KycDocumentKey(key)}_kyc_status"] = "pending";
+            changedDocuments.Add(KycDocumentKey(key));
+        }
+
+        foreach (var documentKey in changedDocuments)
+        {
+            ResetKycStatus(fields, documentKey);
         }
 
         customer.CustomFields = JsonSerializer.Serialize(fields, JsonOptions);
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(new { status = "success", message = "KYC submitted successfully.", kyc = KycState(fields) });
+        return Ok(new
+        {
+            status = "success",
+            message = "KYC submitted successfully.",
+            kyc = KycState(fields),
+            data = BuildMobileKyc(customer, fields)
+        });
     }
 
     [AllowAnonymous]
@@ -210,6 +244,20 @@ public sealed class MobileAppController : ControllerBase
     }
 
     [AllowAnonymous]
+    [HttpGet("masters/location-lookup")]
+    [HttpGet("masters/locations")]
+    public async Task<IActionResult> LocationLookup(
+        [FromQuery] string? pincode,
+        [FromQuery(Name = "state_id")] ulong? stateId,
+        [FromQuery(Name = "city_id")] ulong? cityId,
+        [FromQuery] string? city,
+        CancellationToken cancellationToken)
+    {
+        var response = await _masterDataService.GetLocationDetailsAsync(pincode, stateId, cityId, city, cancellationToken);
+        return Ok(response);
+    }
+
+    [AllowAnonymous]
     [HttpGet("dealers")]
     public async Task<IActionResult> Dealers([FromQuery] string? search, CancellationToken cancellationToken)
     {
@@ -228,6 +276,7 @@ public sealed class MobileAppController : ControllerBase
         var invoices = await CustomerInvoices(customer.Id, cancellationToken);
         var wallet = await BuildWallet(customer.Id, invoices, cancellationToken);
         var walletCards = await BuildDashboardWalletCards(customer, wallet, invoices, cancellationToken);
+        var currentSchemes = await CurrentRunningSchemes(null, cancellationToken);
         var pendingInvoices = invoices.Count(x => x.ApprovalStatus != NewInvoice.StatusApprovedHo && x.ApprovalStatus != NewInvoice.StatusRejected);
 
         return Ok(new
@@ -235,6 +284,7 @@ public sealed class MobileAppController : ControllerBase
             status = "success",
             data = new
             {
+                customer_id = customer.Id,
                 profile = ToProfile(customer),
                 total_invoices = invoices.Select(x => x.Id).Distinct().Count(),
                 approved_invoices = invoices.Where(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo).Select(x => x.Id).Distinct().Count(),
@@ -245,6 +295,7 @@ public sealed class MobileAppController : ControllerBase
                 booster_wallet = wallet.Booster.AvailablePoints,
                 active_wallets = walletCards.Count(x => x.IsActive),
                 wallets = walletCards,
+                current_schemes = currentSchemes,
                 recent_invoices = invoices.OrderByDescending(x => x.InvoiceDate).Take(5)
             }
         });
@@ -267,15 +318,36 @@ public sealed class MobileAppController : ControllerBase
         var invoices = await CustomerInvoices(customer.Id, cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(filter.Search)) invoices = invoices.Where(x => x.InvoiceNumber.Contains(filter.Search) || x.ShopName.Contains(filter.Search)).ToList();
-        if (!string.IsNullOrWhiteSpace(filter.Status)) invoices = invoices.Where(x => string.Equals(x.ApprovalStatusLabel, filter.Status, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (!string.IsNullOrWhiteSpace(filter.Status)) invoices = invoices.Where(x => InvoiceStatusMatches(x, filter.Status)).ToList();
         if (filter.FromDate.HasValue) invoices = invoices.Where(x => x.InvoiceDate.Date >= filter.FromDate.Value.Date).ToList();
         if (filter.ToDate.HasValue) invoices = invoices.Where(x => x.InvoiceDate.Date <= filter.ToDate.Value.Date).ToList();
 
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
-        var total = invoices.Select(x => x.Id).Distinct().Count();
+        var invoiceItems = BuildInvoiceListItems(invoices);
+        var total = invoiceItems.Count;
         var data = invoices.OrderByDescending(x => x.InvoiceDate).ThenByDescending(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToList();
-        return Ok(new { status = "success", data, pagination = new { page, page_size = pageSize, total } });
+        var items = invoiceItems.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+        return Ok(new
+        {
+            status = "success",
+            summary = BuildInvoiceListSummary(invoiceItems),
+            filter_options = new
+            {
+                search_placeholder = "Search invoice number",
+                statuses = new[]
+                {
+                    new { key = "all", label = "All" },
+                    new { key = "approved", label = "Approved" },
+                    new { key = "pending", label = "Pending" },
+                    new { key = "rejected", label = "Rejected" }
+                }
+            },
+            groups = BuildInvoiceMonthGroups(items),
+            items,
+            data,
+            pagination = new { page, page_size = pageSize, total }
+        });
     }
 
     [Authorize]
@@ -284,19 +356,119 @@ public sealed class MobileAppController : ControllerBase
     {
         var customer = await CurrentCustomer(cancellationToken);
         if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
+        if (!request.LoyaltySchemeId.HasValue) return BadRequest(new { status = "error", message = "Loyalty scheme is required." });
+
         var wallet = await BuildWallet(customer.Id, await CustomerInvoices(customer.Id, cancellationToken), cancellationToken);
         var selected = string.Equals(request.WalletType, "Booster", StringComparison.OrdinalIgnoreCase) ? wallet.Booster : wallet.Regular;
-        var points = request.Points <= 0 ? selected.AvailablePoints : request.Points;
+        var scheme = selected.Schemes.FirstOrDefault(x => x.SchemeId == request.LoyaltySchemeId);
+        if (scheme is null)
+        {
+            return BadRequest(new { status = "error", message = "Selected scheme is not available in this wallet." });
+        }
+
+        var points = request.Points <= 0 ? scheme.AvailablePoints : request.Points;
         return Ok(new
         {
             status = "success",
             data = new
             {
+                loyalty_scheme_id = scheme.SchemeId,
+                scheme_name = scheme.SchemeName,
                 wallet_type = selected.WalletType,
-                available_points = selected.AvailablePoints,
+                available_points = scheme.AvailablePoints,
                 requested_points = points,
-                eligible = points > 0 && points <= selected.AvailablePoints,
+                eligible = points > 0 && points <= scheme.AvailablePoints,
                 bank_account = BankAccount(ReadFields(customer))
+            }
+        });
+    }
+
+    [Authorize]
+    [HttpGet("redemptions/history")]
+    public async Task<IActionResult> RedemptionHistory([FromQuery] MobileRedemptionHistoryFilter filter, CancellationToken cancellationToken)
+    {
+        var customer = await CurrentCustomer(cancellationToken);
+        if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
+
+        var query = _dbContext.LoyaltyRedemptions.AsNoTracking()
+            .Where(x => x.DeletedAt == null && x.CustomerId == customer.Id);
+
+        if (!string.IsNullOrWhiteSpace(filter.WalletType) && !string.Equals(filter.WalletType, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(x => x.WalletType == NormalizeWalletType(filter.WalletType));
+        }
+
+        if (!string.IsNullOrWhiteSpace(filter.RedeemMode) && !string.Equals(filter.RedeemMode, "all", StringComparison.OrdinalIgnoreCase))
+        {
+            query = query.Where(x => x.RedeemMode == NormalizeRedeemMode(filter.RedeemMode));
+        }
+
+        if (TryRedemptionStatus(filter.Status, out var status))
+        {
+            query = query.Where(x => x.Status == status);
+        }
+
+        if (filter.FromDate.HasValue) query = query.Where(x => x.CreatedAt.HasValue && x.CreatedAt.Value.Date >= filter.FromDate.Value.Date);
+        if (filter.ToDate.HasValue) query = query.Where(x => x.CreatedAt.HasValue && x.CreatedAt.Value.Date <= filter.ToDate.Value.Date);
+
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var search = filter.Search.Trim();
+            query = query.Where(x => x.TransactionNo.Contains(search)
+                || x.SchemeName.Contains(search)
+                || x.Points.ToString().Contains(search));
+        }
+
+        var rows = await query
+            .OrderByDescending(x => x.CreatedAt)
+            .ThenByDescending(x => x.Id)
+            .ToListAsync(cancellationToken);
+
+        var items = rows.Select(ToMobileRedemptionHistoryItem).ToList();
+        var page = Math.Max(1, filter.Page);
+        var pageSize = Math.Clamp(filter.PageSize, 1, 100);
+        var total = items.Count;
+        var pagedItems = items.Skip((page - 1) * pageSize).Take(pageSize).ToList();
+
+        return Ok(new
+        {
+            status = "success",
+            summary = BuildRedemptionHistorySummary(items),
+            filter_options = new
+            {
+                search_placeholder = "Search transaction or scheme",
+                wallets = new[]
+                {
+                    new { key = "all", label = "All Wallets" },
+                    new { key = "Regular", label = "Regular Wallet" },
+                    new { key = "Booster", label = "Booster Wallet" }
+                },
+                statuses = new[]
+                {
+                    new { key = "all", label = "All Status" },
+                    new { key = "pending", label = "Pending" },
+                    new { key = "approved", label = "Approved" },
+                    new { key = "rejected", label = "Rejected" },
+                    new { key = "hold", label = "Hold" }
+                },
+                modes = new[]
+                {
+                    new { key = "all", label = "All Modes" },
+                    new { key = "NEFT", label = "NEFT" },
+                    new { key = "IMPS", label = "IMPS" }
+                }
+            },
+            groups = BuildRedemptionMonthGroups(pagedItems),
+            items = pagedItems,
+            data = pagedItems,
+            pagination = new
+            {
+                page,
+                page_size = pageSize,
+                total,
+                total_pages = total == 0 ? 0 : (int)Math.Ceiling(total / (decimal)pageSize),
+                has_next = page * pageSize < total,
+                has_previous = page > 1
             }
         });
     }
@@ -386,6 +558,147 @@ public sealed class MobileAppController : ControllerBase
         return invoices.Where(x => x.SecondaryCustomerId == customerId).ToList();
     }
 
+    private static IReadOnlyCollection<MobileInvoiceListItemDto> BuildInvoiceListItems(IReadOnlyCollection<NewInvoiceDto> invoices)
+    {
+        return invoices
+            .GroupBy(x => x.Id)
+            .Select(group =>
+            {
+                var invoice = group.OrderByDescending(x => x.SchemePoints).First();
+                var rewardAmount = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo ? group.Sum(x => x.SchemePoints) : 0;
+                var displayDate = invoice.CreatedAt ?? invoice.InvoiceDate;
+                var statusKey = InvoiceStatusKey(invoice.ApprovalStatus);
+                return new MobileInvoiceListItemDto
+                {
+                    Id = invoice.Id,
+                    InvoiceNumber = invoice.InvoiceNumber,
+                    InvoiceNumberDisplay = $"#{invoice.InvoiceNumber.TrimStart('#')}",
+                    InvoiceDate = invoice.InvoiceDate,
+                    DisplayDate = displayDate.ToString("dd MMM, h:mm tt", CultureInfo.InvariantCulture),
+                    MonthKey = invoice.InvoiceDate.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+                    MonthLabel = invoice.InvoiceDate.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant(),
+                    Amount = invoice.Amount,
+                    AmountDisplay = FormatIndianCurrency(invoice.Amount),
+                    RewardAmount = rewardAmount,
+                    RewardDisplay = rewardAmount > 0 ? $"+{FormatIndianCurrency(rewardAmount)}" : null,
+                    RewardLabel = rewardAmount > 0 ? "Reward" : "Awaiting approval",
+                    Status = statusKey,
+                    StatusLabel = invoice.ApprovalStatusLabel,
+                    IsRewardCredited = rewardAmount > 0,
+                    IsPending = invoice.ApprovalStatus == NewInvoice.StatusPending,
+                    Attachment = invoice.Attachment,
+                    SchemeName = invoice.SchemeName,
+                    SchemeNames = group.Where(x => !string.IsNullOrWhiteSpace(x.SchemeName)).Select(x => x.SchemeName!).Distinct().ToArray()
+                };
+            })
+            .OrderByDescending(x => x.InvoiceDate)
+            .ThenByDescending(x => x.Id)
+            .ToList();
+    }
+
+    private static object BuildInvoiceListSummary(IReadOnlyCollection<MobileInvoiceListItemDto> items) => new
+    {
+        total_invoices = items.Count,
+        rewards_credited = items.Sum(x => x.RewardAmount),
+        rewards_credited_display = FormatIndianCurrency(items.Sum(x => x.RewardAmount)),
+        approved_invoices = items.Count(x => x.Status == "approved"),
+        pending_invoices = items.Count(x => x.Status == "pending"),
+        rejected_invoices = items.Count(x => x.Status == "rejected"),
+        total_turnover = items.Sum(x => x.Amount),
+        total_turnover_display = FormatIndianCurrency(items.Sum(x => x.Amount))
+    };
+
+    private static IReadOnlyCollection<MobileInvoiceMonthGroupDto> BuildInvoiceMonthGroups(IReadOnlyCollection<MobileInvoiceListItemDto> items)
+    {
+        return items
+            .GroupBy(x => new { x.MonthKey, x.MonthLabel })
+            .Select(group => new MobileInvoiceMonthGroupDto
+            {
+                MonthKey = group.Key.MonthKey,
+                MonthLabel = group.Key.MonthLabel,
+                Count = group.Count(),
+                Turnover = group.Sum(x => x.Amount),
+                TurnoverDisplay = FormatIndianCurrency(group.Sum(x => x.Amount)),
+                RewardAmount = group.Sum(x => x.RewardAmount),
+                RewardDisplay = group.Sum(x => x.RewardAmount) > 0 ? $"+{FormatIndianCurrency(group.Sum(x => x.RewardAmount))}" : null,
+                Items = group.ToList()
+            })
+            .OrderByDescending(x => x.MonthKey)
+            .ToList();
+    }
+
+    private static MobileRedemptionHistoryItemDto ToMobileRedemptionHistoryItem(LoyaltyRedemption redemption)
+    {
+        var createdAt = redemption.CreatedAt ?? DateTime.UtcNow;
+        return new MobileRedemptionHistoryItemDto
+        {
+            Id = redemption.Id,
+            TransactionNo = redemption.TransactionNo,
+            TransactionNoDisplay = string.IsNullOrWhiteSpace(redemption.TransactionNo) ? $"#{redemption.Id}" : redemption.TransactionNo,
+            LoyaltySchemeId = redemption.LoyaltySchemeId,
+            SchemeName = redemption.SchemeName,
+            WalletType = NormalizeWalletType(redemption.WalletType),
+            RedeemMode = NormalizeRedeemMode(redemption.RedeemMode),
+            Points = redemption.Points,
+            PointsDisplay = $"{redemption.Points:0.##}",
+            AccountHolder = redemption.AccountHolder,
+            MaskedAccountNumber = Mask(redemption.AccountNumber),
+            BankName = redemption.BankName,
+            IfscCode = redemption.IfscCode,
+            Status = RedemptionStatusKey(redemption.Status),
+            StatusLabel = RedemptionStatusLabel(redemption.Status),
+            Remark = redemption.Remark,
+            CreatedAt = redemption.CreatedAt,
+            DisplayDate = createdAt.ToString("dd MMM yyyy", CultureInfo.InvariantCulture),
+            MonthKey = createdAt.ToString("yyyy-MM", CultureInfo.InvariantCulture),
+            MonthLabel = createdAt.ToString("MMMM yyyy", CultureInfo.InvariantCulture).ToUpperInvariant()
+        };
+    }
+
+    private static object BuildRedemptionHistorySummary(IReadOnlyCollection<MobileRedemptionHistoryItemDto> items) => new
+    {
+        total_redemptions = items.Count,
+        total_points = items.Sum(x => x.Points),
+        pending_points = items.Where(x => x.Status == "pending").Sum(x => x.Points),
+        approved_points = items.Where(x => x.Status == "approved").Sum(x => x.Points),
+        rejected_points = items.Where(x => x.Status == "rejected").Sum(x => x.Points),
+        hold_points = items.Where(x => x.Status == "hold").Sum(x => x.Points),
+        regular_points = items.Where(x => x.WalletType == "Regular").Sum(x => x.Points),
+        booster_points = items.Where(x => x.WalletType == "Booster").Sum(x => x.Points),
+        pending_count = items.Count(x => x.Status == "pending"),
+        approved_count = items.Count(x => x.Status == "approved"),
+        rejected_count = items.Count(x => x.Status == "rejected"),
+        hold_count = items.Count(x => x.Status == "hold")
+    };
+
+    private static IReadOnlyCollection<MobileRedemptionMonthGroupDto> BuildRedemptionMonthGroups(IReadOnlyCollection<MobileRedemptionHistoryItemDto> items)
+    {
+        return items
+            .GroupBy(x => new { x.MonthKey, x.MonthLabel })
+            .Select(group => new MobileRedemptionMonthGroupDto
+            {
+                MonthKey = group.Key.MonthKey,
+                MonthLabel = group.Key.MonthLabel,
+                Count = group.Count(),
+                TotalPoints = group.Sum(x => x.Points),
+                Items = group.ToList()
+            })
+            .OrderByDescending(x => x.MonthKey)
+            .ToList();
+    }
+
+    private static IReadOnlyCollection<MobileWalletSchemeBalanceDto> ToMobileSchemeBalances(WalletDto wallet) =>
+        wallet.Schemes
+            .Where(x => x.AvailablePoints > 0)
+            .Select(x => new MobileWalletSchemeBalanceDto
+            {
+                LoyaltySchemeId = x.SchemeId,
+                SchemeName = x.SchemeName,
+                AvailablePoints = x.AvailablePoints,
+                WalletType = wallet.WalletType
+            })
+            .ToList();
+
     private async Task<object> WalletResponse(string walletType, CancellationToken cancellationToken)
     {
         var customer = await CurrentCustomer(cancellationToken);
@@ -471,6 +784,8 @@ public sealed class MobileAppController : ControllerBase
                 Title = "Slab Wallet",
                 WalletType = "Regular",
                 Points = wallet.AvailablePoints,
+                AvailablePoints = wallet.AvailablePoints,
+                Schemes = ToMobileSchemeBalances(wallet),
                 IsActive = false,
                 ExpiryLabel = "No active scheme",
                 NextMessage = "No active slab scheme available.",
@@ -504,8 +819,10 @@ public sealed class MobileAppController : ControllerBase
             SchemeTag = scheme.SchemeTag,
             BasedOn = scheme.BasedOn,
             Points = wallet.AvailablePoints,
+            AvailablePoints = wallet.AvailablePoints,
             EarnedPoints = wallet.EarnedPoints,
             RedeemedPoints = wallet.RedeemedPoints,
+            Schemes = ToMobileSchemeBalances(wallet),
             InvoiceAmount = invoiceAmount,
             InvoiceAmountShort = FormatIndianShortAmount(invoiceAmount),
             AchievedReward = achieved?.RewardValue ?? 0,
@@ -562,8 +879,10 @@ public sealed class MobileAppController : ControllerBase
             SchemeTag = scheme?.SchemeTag ?? "Booster",
             BasedOn = scheme?.BasedOn,
             Points = wallet.AvailablePoints,
+            AvailablePoints = wallet.AvailablePoints,
             EarnedPoints = wallet.EarnedPoints,
             RedeemedPoints = wallet.RedeemedPoints,
+            Schemes = ToMobileSchemeBalances(wallet),
             InvoiceAmount = invoiceAmount,
             InvoiceAmountShort = FormatIndianShortAmount(invoiceAmount),
             StartDate = scheme?.StartDate,
@@ -587,27 +906,54 @@ public sealed class MobileAppController : ControllerBase
         };
     }
 
-    private async Task<object> LiveSchemes(string? walletType, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<CurrentSchemeDto>> LiveSchemes(string? walletType, CancellationToken cancellationToken) =>
+        await CurrentRunningSchemes(walletType, cancellationToken);
+
+    private async Task<IReadOnlyCollection<CurrentSchemeDto>> CurrentRunningSchemes(string? walletType, CancellationToken cancellationToken)
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = CurrentBusinessDate();
         var query = _dbContext.LoyaltySchemes.AsNoTracking().Include(x => x.Slabs)
-            .Where(x => x.DeletedAt == null && x.Active == "Y" && x.Status == "Live" && x.StartDate <= today && x.EndDate >= today);
+            .Where(x => x.DeletedAt == null
+                && x.Active == "Y"
+                && x.Status == "Live"
+                && x.SchemeType == "Invoice"
+                && x.StartDate <= today
+                && x.EndDate >= today);
         if (walletType == "Booster") query = query.Where(x => x.SchemeTag == "Booster");
         if (walletType == "Regular") query = query.Where(x => x.SchemeTag != "Booster");
 
-        return await query.OrderBy(x => x.SchemeTag).ThenBy(x => x.SchemeName).Select(x => new
+        var schemes = await query.OrderBy(x => x.SchemeTag).ThenBy(x => x.SchemeName).ToListAsync(cancellationToken);
+        return schemes.Select(scheme => new CurrentSchemeDto
         {
-            x.Id,
-            x.SchemeName,
-            x.SchemeCode,
-            x.SchemeDescription,
-            x.SchemeTag,
-            x.CustomerType,
-            x.StartDate,
-            x.EndDate,
-            x.BasedOn,
-            slabs = x.Slabs.OrderBy(s => s.SortOrder).Select(s => new { s.Id, s.TierName, s.ValueFrom, s.ValueTo, s.RewardValue })
-        }).ToListAsync(cancellationToken);
+            Id = scheme.Id,
+            SchemeName = scheme.SchemeName,
+            SchemeCode = scheme.SchemeCode,
+            SchemeDescription = scheme.SchemeDescription,
+            SchemeTag = scheme.SchemeTag,
+            WalletType = IsBooster(scheme.SchemeTag) ? "Booster" : "Regular",
+            CustomerType = scheme.CustomerType,
+            AreaScope = scheme.AreaScope,
+            AreaValues = ReadSchemeAreaValues(scheme.AreaValues),
+            StartDate = scheme.StartDate,
+            EndDate = scheme.EndDate,
+            BasedOn = scheme.BasedOn,
+            Status = scheme.Status,
+            DaysLeft = Math.Max(0, (scheme.EndDate.ToDateTime(TimeOnly.MinValue).Date - DateTime.UtcNow.AddHours(5.5).Date).Days),
+            Tiers = scheme.Slabs
+                .OrderBy(slab => slab.ValueFrom)
+                .ThenBy(slab => slab.SortOrder)
+                .Select(slab => new CurrentSchemeTierDto
+                {
+                    Id = slab.Id,
+                    TierName = slab.TierName,
+                    ValueFrom = slab.ValueFrom,
+                    ValueTo = slab.ValueTo,
+                    RewardValue = slab.RewardValue,
+                    RewardLabel = FormatReward(slab.RewardValue, scheme.BasedOn),
+                    SortOrder = slab.SortOrder
+                })
+                .ToList()
+        }).ToList();
     }
 
     private async Task StoreCustomerTokenAndLogin(ulong customerId, string tokenId, DeviceRequest request, CancellationToken cancellationToken)
@@ -663,6 +1009,70 @@ public sealed class MobileAppController : ControllerBase
         };
     }
 
+    private object BuildMobileKyc(Customer customer, IReadOnlyDictionary<string, string?> fields)
+    {
+        var documents = new[]
+        {
+            BuildMobileKycDocument(fields, "gst", "GST", FirstField(fields, "gst_attachment", "gst_image"), new[]
+            {
+                new MobileKycDetailDto("GST Number", "gst_number", FirstField(fields, "gst_number", "gstin_no"))
+            }),
+            BuildMobileKycDocument(fields, "pan", "PAN", FirstField(fields, "pan_attachment", "pan_image"), new[]
+            {
+                new MobileKycDetailDto("PAN Number", "pan_number", FirstField(fields, "pan_number", "pan_no"))
+            }),
+            BuildMobileKycDocument(fields, "aadhar", "Aadhaar Card", FirstField(fields, "aadhar_attachment", "aadhaar_attachment", "adharcard"), new[]
+            {
+                new MobileKycDetailDto("Aadhaar Number", "aadhar_no", FirstField(fields, "aadhar_no", "aadhaar_no", "aadhaar_number", "aadhar_number"))
+            }),
+            BuildMobileKycDocument(fields, "bank", "Blank Cheque / Passbook", FirstField(fields, "bank_proof", "blank_cheque", "passbook"), new[]
+            {
+                new MobileKycDetailDto("Bank Account Type", "bank_account_type", Field(fields, "bank_account_type")),
+                new MobileKycDetailDto("Bank Name", "bank_name", Field(fields, "bank_name")),
+                new MobileKycDetailDto("Account Number", "bank_account_number", Field(fields, "bank_account_number")),
+                new MobileKycDetailDto("IFSC Code", "ifsc_code", Field(fields, "ifsc_code")),
+                new MobileKycDetailDto("Account Holder Name", "account_holder_name", Field(fields, "account_holder_name"))
+            })
+        };
+
+        return new
+        {
+            customer_id = customer.Id,
+            summary = KycState(fields),
+            bank_account = BankAccount(fields),
+            documents,
+            fields = new
+            {
+                gst_number = FirstField(fields, "gst_number", "gstin_no") ?? string.Empty,
+                pan_number = FirstField(fields, "pan_number", "pan_no") ?? string.Empty,
+                aadhar_no = FirstField(fields, "aadhar_no", "aadhaar_no", "aadhaar_number", "aadhar_number") ?? string.Empty,
+                bank_account_type = Field(fields, "bank_account_type") ?? string.Empty,
+                bank_name = Field(fields, "bank_name") ?? string.Empty,
+                bank_account_number = Field(fields, "bank_account_number") ?? string.Empty,
+                ifsc_code = Field(fields, "ifsc_code") ?? string.Empty,
+                account_holder_name = Field(fields, "account_holder_name") ?? string.Empty
+            }
+        };
+    }
+
+    private MobileKycDocumentDto BuildMobileKycDocument(IReadOnlyDictionary<string, string?> fields, string key, string label, string? attachment, IReadOnlyCollection<MobileKycDetailDto> details)
+    {
+        var status = KycStatus(Field(fields, $"{key}_kyc_status"));
+        return new MobileKycDocumentDto
+        {
+            Key = key,
+            Label = label,
+            Attachment = attachment ?? string.Empty,
+            AttachmentUrl = MediaUrl(attachment),
+            Status = status,
+            StatusLabel = KycStatusLabel(status),
+            Remark = Field(fields, $"{key}_kyc_remark") ?? string.Empty,
+            ActionBy = Field(fields, $"{key}_kyc_action_by_name") ?? Field(fields, $"{key}_kyc_action_by") ?? string.Empty,
+            ActionAt = Field(fields, $"{key}_kyc_action_at") ?? string.Empty,
+            Details = details.ToList()
+        };
+    }
+
     private static object BankAccount(IReadOnlyDictionary<string, string?> fields)
     {
         var account = Field(fields, "bank_account_number") ?? string.Empty;
@@ -685,8 +1095,21 @@ public sealed class MobileAppController : ControllerBase
         return new { uploaded, approved, status = approved == documents.Length ? "approved" : uploaded > 0 ? "pending" : "missing" };
     }
 
+    private string MediaUrl(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return string.Empty;
+        if (Uri.TryCreate(path, UriKind.Absolute, out _)) return path;
+        var request = Request;
+        return $"{request.Scheme}://{request.Host}{path}";
+    }
+
     private async Task<string> SaveFileAsync(IFormFile file, string folder, CancellationToken cancellationToken)
     {
+        if (!IsPdfOrImageFile(file))
+        {
+            throw new BadHttpRequestException("Only PDF and image files are allowed.");
+        }
+
         var root = _environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
         var directory = Path.Combine(root, "uploads", folder);
         Directory.CreateDirectory(directory);
@@ -747,7 +1170,127 @@ public sealed class MobileAppController : ControllerBase
     private static string? Field(IReadOnlyDictionary<string, string?> fields, string key) =>
         fields.TryGetValue(key, out var value) && !string.IsNullOrWhiteSpace(value) ? value : null;
 
+    private static string? FirstField(IReadOnlyDictionary<string, string?> fields, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            var value = Field(fields, key);
+            if (!string.IsNullOrWhiteSpace(value)) return value;
+        }
+
+        return null;
+    }
+
+    private static string KycStatus(string? value)
+    {
+        if (string.Equals(value, "approved", StringComparison.OrdinalIgnoreCase)) return "approved";
+        if (string.Equals(value, "rejected", StringComparison.OrdinalIgnoreCase)) return "rejected";
+        return "pending";
+    }
+
+    private static string KycStatusLabel(string status) => status switch
+    {
+        "approved" => "Approved",
+        "rejected" => "Rejected",
+        _ => "Pending"
+    };
+
+    private static void ResetKycStatus(IDictionary<string, string?> fields, string documentKey)
+    {
+        if (string.IsNullOrWhiteSpace(documentKey)) return;
+
+        var prefix = $"{documentKey}_kyc";
+        fields[$"{prefix}_status"] = "pending";
+        fields.Remove($"{prefix}_remark");
+        fields.Remove($"{prefix}_action_by");
+        fields.Remove($"{prefix}_action_by_name");
+        fields.Remove($"{prefix}_action_at");
+    }
+
+    private static string? KycDocumentKeyForDetail(string key) => key switch
+    {
+        "gst_number" or "gstin_no" => "gst",
+        "pan_number" or "pan_no" => "pan",
+        "aadhar_no" or "aadhaar_no" or "aadhaar_number" or "aadhar_number" => "aadhar",
+        "bank_account_type" or "bank_name" or "bank_account_number" or "bank_account_number_confirm" or "ifsc_code" or "account_holder_name" => "bank",
+        _ => null
+    };
+
+    private static bool IsImageFile(IFormFile file)
+    {
+        if (file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase)) return true;
+        return Path.GetExtension(file.FileName).ToLowerInvariant() is ".jpg" or ".jpeg" or ".png" or ".gif" or ".webp" or ".bmp";
+    }
+
+    private static bool IsPdfOrImageFile(IFormFile file)
+    {
+        if (IsImageFile(file)) return true;
+        if (string.Equals(file.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase)) return true;
+        return string.Equals(Path.GetExtension(file.FileName), ".pdf", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool IsBooster(string? schemeTag) => string.Equals(schemeTag, "Booster", StringComparison.OrdinalIgnoreCase);
+
+    private static DateOnly CurrentBusinessDate() => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5.5));
+
+    private static string InvoiceStatusKey(int status) => status switch
+    {
+        NewInvoice.StatusApprovedHo => "approved",
+        NewInvoice.StatusRejected => "rejected",
+        _ => "pending"
+    };
+
+    private static bool InvoiceStatusMatches(NewInvoiceDto invoice, string status)
+    {
+        var normalized = status.Trim();
+        if (string.Equals(normalized, "all", StringComparison.OrdinalIgnoreCase)) return true;
+        if (string.Equals(normalized, InvoiceStatusKey(invoice.ApprovalStatus), StringComparison.OrdinalIgnoreCase)) return true;
+        return string.Equals(invoice.ApprovalStatusLabel, normalized, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeWalletType(string? value) =>
+        string.Equals(value, "Booster", StringComparison.OrdinalIgnoreCase) ? "Booster" : "Regular";
+
+    private static string NormalizeRedeemMode(string? value) =>
+        string.Equals(value, "IMPS", StringComparison.OrdinalIgnoreCase) ? "IMPS" : "NEFT";
+
+    private static string RedemptionStatusKey(int status) => status switch
+    {
+        LoyaltyRedemption.StatusApproved => "approved",
+        LoyaltyRedemption.StatusRejected => "rejected",
+        LoyaltyRedemption.StatusHold => "hold",
+        _ => "pending"
+    };
+
+    private static string RedemptionStatusLabel(int status) => status switch
+    {
+        LoyaltyRedemption.StatusApproved => "Approved",
+        LoyaltyRedemption.StatusRejected => "Rejected",
+        LoyaltyRedemption.StatusHold => "Hold",
+        _ => "Pending"
+    };
+
+    private static bool TryRedemptionStatus(string? value, out int status)
+    {
+        status = LoyaltyRedemption.StatusPending;
+        if (string.IsNullOrWhiteSpace(value) || string.Equals(value, "all", StringComparison.OrdinalIgnoreCase)) return false;
+        if (int.TryParse(value, out var parsed) && parsed is >= LoyaltyRedemption.StatusPending and <= LoyaltyRedemption.StatusHold)
+        {
+            status = parsed;
+            return true;
+        }
+
+        status = value.Trim().ToLowerInvariant() switch
+        {
+            "approved" => LoyaltyRedemption.StatusApproved,
+            "rejected" => LoyaltyRedemption.StatusRejected,
+            "hold" => LoyaltyRedemption.StatusHold,
+            "pending" => LoyaltyRedemption.StatusPending,
+            _ => -1
+        };
+
+        return status >= LoyaltyRedemption.StatusPending;
+    }
 
     private static bool SchemeCustomerTypeMatches(string customerType, ulong? actualCustomerType)
     {
@@ -770,7 +1313,20 @@ public sealed class MobileAppController : ControllerBase
     private static string FormatReward(decimal value, string? basedOn) =>
         string.Equals(basedOn, "Percentage", StringComparison.OrdinalIgnoreCase) ? $"{value:0.##}%" : $"Rs. {value:0.##}";
 
-    private static string FormatIndianCurrency(decimal value) => $"₹{value:N0}";
+    private static IReadOnlyCollection<string> ReadSchemeAreaValues(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json, JsonOptions) ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private static string FormatIndianCurrency(decimal value) => $"₹{value.ToString("N0", CultureInfo.GetCultureInfo("en-IN"))}";
 
     private static string FormatIndianShortAmount(decimal value)
     {
@@ -855,8 +1411,21 @@ public sealed class MobileAppController : ControllerBase
 
     public sealed class MobileRedemptionRequest
     {
+        public ulong? LoyaltySchemeId { get; set; }
         public string? WalletType { get; set; }
         public decimal Points { get; set; }
+    }
+
+    public sealed class MobileRedemptionHistoryFilter
+    {
+        public string? Search { get; set; }
+        public string? Status { get; set; }
+        [FromQuery(Name = "wallet_type")] public string? WalletType { get; set; }
+        [FromQuery(Name = "redeem_mode")] public string? RedeemMode { get; set; }
+        [FromQuery(Name = "from_date")] public DateTime? FromDate { get; set; }
+        [FromQuery(Name = "to_date")] public DateTime? ToDate { get; set; }
+        public int Page { get; set; } = 1;
+        [FromQuery(Name = "page_size")] public int PageSize { get; set; } = 20;
     }
 
     public sealed class BankAccountRequest
@@ -871,6 +1440,98 @@ public sealed class MobileAppController : ControllerBase
     private sealed record WalletDto(string WalletType, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints, IReadOnlyCollection<WalletSchemeDto> Schemes);
     private sealed record WalletSchemeDto(ulong? SchemeId, string SchemeName, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints);
 
+    private sealed record MobileKycDetailDto(string Label, string Key, string? Value);
+
+    private sealed class MobileKycDocumentDto
+    {
+        public string Key { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string Attachment { get; set; } = string.Empty;
+        public string AttachmentUrl { get; set; } = string.Empty;
+        public string Status { get; set; } = "pending";
+        public string StatusLabel { get; set; } = "Pending";
+        public string Remark { get; set; } = string.Empty;
+        public string ActionBy { get; set; } = string.Empty;
+        public string ActionAt { get; set; } = string.Empty;
+        public IReadOnlyCollection<MobileKycDetailDto> Details { get; set; } = [];
+    }
+
+    private sealed class MobileWalletSchemeBalanceDto
+    {
+        public ulong? LoyaltySchemeId { get; set; }
+        public string SchemeName { get; set; } = string.Empty;
+        public decimal AvailablePoints { get; set; }
+        public string WalletType { get; set; } = string.Empty;
+    }
+
+    private sealed class MobileInvoiceListItemDto
+    {
+        public ulong Id { get; set; }
+        public string InvoiceNumber { get; set; } = string.Empty;
+        public string InvoiceNumberDisplay { get; set; } = string.Empty;
+        public DateTime InvoiceDate { get; set; }
+        public string DisplayDate { get; set; } = string.Empty;
+        public string MonthKey { get; set; } = string.Empty;
+        public string MonthLabel { get; set; } = string.Empty;
+        public decimal Amount { get; set; }
+        public string AmountDisplay { get; set; } = string.Empty;
+        public decimal RewardAmount { get; set; }
+        public string? RewardDisplay { get; set; }
+        public string RewardLabel { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string StatusLabel { get; set; } = string.Empty;
+        public bool IsRewardCredited { get; set; }
+        public bool IsPending { get; set; }
+        public string? Attachment { get; set; }
+        public string? SchemeName { get; set; }
+        public IReadOnlyCollection<string> SchemeNames { get; set; } = [];
+    }
+
+    private sealed class MobileInvoiceMonthGroupDto
+    {
+        public string MonthKey { get; set; } = string.Empty;
+        public string MonthLabel { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public decimal Turnover { get; set; }
+        public string TurnoverDisplay { get; set; } = string.Empty;
+        public decimal RewardAmount { get; set; }
+        public string? RewardDisplay { get; set; }
+        public IReadOnlyCollection<MobileInvoiceListItemDto> Items { get; set; } = [];
+    }
+
+    private sealed class MobileRedemptionHistoryItemDto
+    {
+        public ulong Id { get; set; }
+        public string TransactionNo { get; set; } = string.Empty;
+        public string TransactionNoDisplay { get; set; } = string.Empty;
+        public ulong? LoyaltySchemeId { get; set; }
+        public string SchemeName { get; set; } = string.Empty;
+        public string WalletType { get; set; } = string.Empty;
+        public string RedeemMode { get; set; } = string.Empty;
+        public decimal Points { get; set; }
+        public string PointsDisplay { get; set; } = string.Empty;
+        public string AccountHolder { get; set; } = string.Empty;
+        public string MaskedAccountNumber { get; set; } = string.Empty;
+        public string BankName { get; set; } = string.Empty;
+        public string IfscCode { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public string StatusLabel { get; set; } = string.Empty;
+        public string? Remark { get; set; }
+        public DateTime? CreatedAt { get; set; }
+        public string DisplayDate { get; set; } = string.Empty;
+        public string MonthKey { get; set; } = string.Empty;
+        public string MonthLabel { get; set; } = string.Empty;
+    }
+
+    private sealed class MobileRedemptionMonthGroupDto
+    {
+        public string MonthKey { get; set; } = string.Empty;
+        public string MonthLabel { get; set; } = string.Empty;
+        public int Count { get; set; }
+        public decimal TotalPoints { get; set; }
+        public IReadOnlyCollection<MobileRedemptionHistoryItemDto> Items { get; set; } = [];
+    }
+
     private sealed class DashboardWalletCardDto
     {
         public string Key { get; set; } = string.Empty;
@@ -882,8 +1543,10 @@ public sealed class MobileAppController : ControllerBase
         public string? SchemeTag { get; set; }
         public string? BasedOn { get; set; }
         public decimal Points { get; set; }
+        public decimal AvailablePoints { get; set; }
         public decimal EarnedPoints { get; set; }
         public decimal RedeemedPoints { get; set; }
+        public IReadOnlyCollection<MobileWalletSchemeBalanceDto> Schemes { get; set; } = [];
         public decimal InvoiceAmount { get; set; }
         public string InvoiceAmountShort { get; set; } = "₹0";
         public decimal AchievedReward { get; set; }
@@ -917,5 +1580,35 @@ public sealed class MobileAppController : ControllerBase
         public string RewardLabel { get; set; } = string.Empty;
         public bool Achieved { get; set; }
         public bool Current { get; set; }
+    }
+
+    private sealed class CurrentSchemeDto
+    {
+        public ulong Id { get; set; }
+        public string SchemeName { get; set; } = string.Empty;
+        public string SchemeCode { get; set; } = string.Empty;
+        public string? SchemeDescription { get; set; }
+        public string SchemeTag { get; set; } = string.Empty;
+        public string WalletType { get; set; } = string.Empty;
+        public string CustomerType { get; set; } = string.Empty;
+        public string AreaScope { get; set; } = string.Empty;
+        public IReadOnlyCollection<string> AreaValues { get; set; } = [];
+        public DateOnly StartDate { get; set; }
+        public DateOnly EndDate { get; set; }
+        public string BasedOn { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public int DaysLeft { get; set; }
+        public IReadOnlyCollection<CurrentSchemeTierDto> Tiers { get; set; } = [];
+    }
+
+    private sealed class CurrentSchemeTierDto
+    {
+        public ulong Id { get; set; }
+        public string TierName { get; set; } = string.Empty;
+        public decimal ValueFrom { get; set; }
+        public decimal? ValueTo { get; set; }
+        public decimal RewardValue { get; set; }
+        public string RewardLabel { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
     }
 }

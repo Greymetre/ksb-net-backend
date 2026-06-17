@@ -87,17 +87,19 @@ public sealed class RedemptionService : IRedemptionService
         return LaravelApiResponse.Success("customers", options);
     }
 
-    public async Task<LaravelApiResponse> CreateRedemptionAsync(RedemptionCreateRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
+    public async Task<LaravelApiResponse> CreateRedemptionAsync(RedemptionCreateRequestDto request, ulong? actorUserId, CancellationToken cancellationToken, bool scopeInvoicesToActor = true)
     {
         if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
         if (request.CustomerId == 0) throw Http(LaravelStatusCodes.NoContentLikeValidation, "Customer is required.");
+        if (!request.LoyaltySchemeId.HasValue) throw Http(LaravelStatusCodes.NoContentLikeValidation, "Loyalty scheme is required.");
         if (!request.BankConfirmed) throw Http(LaravelStatusCodes.NoContentLikeValidation, "Bank details confirmation is required.");
         if (request.Points < MinimumRedemptionPoints) throw Http(LaravelStatusCodes.NoContentLikeValidation, $"Minimum redemption is {MinimumRedemptionPoints:0} points.");
 
         var walletType = NormalizeWalletType(request.WalletType);
         var redeemMode = NormalizeRedeemMode(request.RedeemMode);
         var customer = await _customerRepository.GetCustomerAsync(request.CustomerId, cancellationToken) ?? throw Http(LaravelStatusCodes.NotFound, "Customer not found.");
-        var invoices = await _newInvoiceRepository.GetInvoicesAsync(new NewInvoiceFilterDto(), actorUserId, cancellationToken);
+        var invoiceActorUserId = scopeInvoicesToActor ? actorUserId : null;
+        var invoices = await _newInvoiceRepository.GetInvoicesAsync(new NewInvoiceFilterDto(), invoiceActorUserId, cancellationToken);
         var option = await BuildCustomerOptionAsync(customer, invoices.Where(x => x.SecondaryCustomerId == customer.Id).ToList(), cancellationToken);
 
         if (!option.KycApproved) throw Http(LaravelStatusCodes.NoContentLikeValidation, option.KycMessage);
@@ -133,7 +135,15 @@ public sealed class RedemptionService : IRedemptionService
         };
 
         await _repository.CreateAsync(redemption, cancellationToken);
-        return LaravelApiResponse.Success("redemption", redemption, "Redemption request submitted successfully");
+        return LaravelApiResponse.Success("data", new
+        {
+            redemption_id = redemption.Id,
+            request_id = redemption.TransactionNo,
+            transaction_no_display = redemption.TransactionNo,
+            status = "pending",
+            status_label = "Pending",
+            message = "Redemption request submitted successfully"
+        }, "Redemption request submitted successfully");
     }
 
     private async Task<RedemptionCustomerOptionDto> BuildCustomerOptionAsync(CustomerDto customer, IReadOnlyCollection<NewInvoiceDto> invoices, CancellationToken cancellationToken)
@@ -221,11 +231,11 @@ public sealed class RedemptionService : IRedemptionService
     {
         for (var attempt = 0; attempt < 10; attempt++)
         {
-            var value = $"TXN-{DateTime.UtcNow:yyyy}-{Random.Shared.Next(1000, 9999)}";
+            var value = $"KSB-R{Random.Shared.Next(10000, 99999)}";
             if (!await _repository.TransactionNoExistsAsync(value, cancellationToken)) return value;
         }
 
-        return $"TXN-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        return $"KSB-R{DateTime.UtcNow:yyMMddHHmmss}";
     }
 
     private static string NormalizeWalletType(string? value)

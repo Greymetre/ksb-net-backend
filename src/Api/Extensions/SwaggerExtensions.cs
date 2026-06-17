@@ -97,7 +97,7 @@ public sealed class SimpleApiDescriptionFilter : IOperationFilter
             "Login" => "Send username and password. Optional device details can be sent for mobile login tracking.",
             "Signup" => "Send user details for creating an employee/user account.",
             "CustomerSignup" => "Send customer signup details for creating a customer account.",
-            "GetLocationDetails" => "Send pincode, city_id, or city to fetch linked country, state, district, city, and pincode data.",
+            "GetLocationDetails" => "Send pincode, state_id, city_id, or city to fetch linked country, state, district, city, and pincode data.",
             _ => "Send the JSON fields required by this endpoint."
         };
 
@@ -139,7 +139,7 @@ public sealed class SimpleApiDescriptionFilter : IOperationFilter
             "Returns active pincodes for dropdowns. You can filter by city_id or pincode text."),
         ["MasterData.GetLocationDetails"] = new(
             "Get location details",
-            "Returns country, state, district, city, and pincode details by pincode, city_id, or city name."),
+            "Returns country, state, district, city, and pincode details by pincode, state_id, city_id, or city name."),
 
         ["MasterData.GetBranches"] = new(
             "List branches",
@@ -248,7 +248,7 @@ public sealed class SimpleApiDescriptionFilter : IOperationFilter
         ["id"] = "Database ID of the record.",
         ["search"] = "Optional text used to filter the list.",
         ["country_id"] = "Optional country ID used to filter states.",
-        ["state_id"] = "Optional state ID used to filter districts or cities.",
+        ["state_id"] = "Optional state ID used to filter districts, cities, or location details.",
         ["district_id"] = "Optional district ID used to filter cities.",
         ["city_id"] = "Optional city ID used to filter pincodes or location details.",
         ["pincode"] = "Optional pincode used to filter pincodes or fetch location details.",

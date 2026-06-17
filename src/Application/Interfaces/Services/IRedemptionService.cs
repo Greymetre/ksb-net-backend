@@ -9,5 +9,5 @@ public interface IRedemptionService
     Task<LaravelApiResponse> GetRedemptionsAsync(RedemptionFilterDto filter, CancellationToken cancellationToken);
     Task<MasterDataFileDto> ExportRedemptionsAsync(RedemptionFilterDto filter, CancellationToken cancellationToken);
     Task<LaravelApiResponse> GetCustomerOptionsAsync(string? search, ulong? actorUserId, CancellationToken cancellationToken);
-    Task<LaravelApiResponse> CreateRedemptionAsync(RedemptionCreateRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
+    Task<LaravelApiResponse> CreateRedemptionAsync(RedemptionCreateRequestDto request, ulong? actorUserId, CancellationToken cancellationToken, bool scopeInvoicesToActor = true);
 }

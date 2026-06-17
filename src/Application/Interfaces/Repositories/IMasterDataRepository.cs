@@ -71,5 +71,5 @@ public interface IMasterDataRepository
     Task<DepartmentDto?> UpdateDepartmentAsync(ulong id, DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<DepartmentDto?> SetDepartmentActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken);
     Task<bool> DeleteDepartmentAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken);
-    Task<IReadOnlyCollection<LocationDetailsDto>> GetLocationDetailsAsync(string? pincode, ulong? cityId, string? city, CancellationToken cancellationToken);
+    Task<IReadOnlyCollection<LocationDetailsDto>> GetLocationDetailsAsync(string? pincode, ulong? stateId, ulong? cityId, string? city, CancellationToken cancellationToken);
 }

@@ -78,5 +78,5 @@ public interface IMasterDataService
     Task<LaravelApiResponse> UpdateDepartmentAsync(ulong id, DepartmentRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> SetDepartmentActiveAsync(ulong id, ActiveStatusRequestDto request, ulong? actorUserId, CancellationToken cancellationToken);
     Task<LaravelApiResponse> DeleteDepartmentAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken);
-    Task<LaravelApiResponse> GetLocationDetailsAsync(string? pincode, ulong? cityId, string? city, CancellationToken cancellationToken);
+    Task<LaravelApiResponse> GetLocationDetailsAsync(string? pincode, ulong? stateId, ulong? cityId, string? city, CancellationToken cancellationToken);
 }

@@ -796,16 +796,16 @@ public sealed class MasterDataController : ControllerBase
     }
 
     [HttpGet("getlocationdetails")]
-    public async Task<IActionResult> GetLocationDetails([FromQuery] string? pincode, [FromQuery(Name = "city_id")] ulong? cityId, [FromQuery] string? city, CancellationToken cancellationToken)
+    public async Task<IActionResult> GetLocationDetails([FromQuery] string? pincode, [FromQuery(Name = "state_id")] ulong? stateId, [FromQuery(Name = "city_id")] ulong? cityId, [FromQuery] string? city, CancellationToken cancellationToken)
     {
-        var response = await _masterDataService.GetLocationDetailsAsync(pincode, cityId, city, cancellationToken);
+        var response = await _masterDataService.GetLocationDetailsAsync(pincode, stateId, cityId, city, cancellationToken);
         return Ok(response);
     }
 
     [HttpPost("getlocationdetails")]
     public async Task<IActionResult> GetLocationDetails([FromBody] LocationDetailsRequestDto request, CancellationToken cancellationToken)
     {
-        var response = await _masterDataService.GetLocationDetailsAsync(request.Pincode, request.CityId, request.City, cancellationToken);
+        var response = await _masterDataService.GetLocationDetailsAsync(request.Pincode, request.StateId, request.CityId, request.City, cancellationToken);
         return Ok(response);
     }
 

@@ -83,7 +83,7 @@ public sealed class NewInvoiceService : INewInvoiceService
             InvoiceNumber = request.InvoiceNumber!.Trim(),
             InvoiceDate = request.InvoiceDate!.Value.Date,
             Amount = request.Amount!.Value,
-            Points = request.Points ?? 0,
+            Points = 0,
             Attachment = NormalizeText(request.Attachment),
             ApprovalStatus = NewInvoice.StatusPending,
             CreatedBy = actorUserId.Value,
@@ -117,7 +117,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         invoice.InvoiceNumber = request.InvoiceNumber!.Trim();
         invoice.InvoiceDate = request.InvoiceDate!.Value.Date;
         invoice.Amount = request.Amount!.Value;
-        invoice.Points = request.Points ?? 0;
+        invoice.Points = 0;
         if (request.Attachment is not null) invoice.Attachment = NormalizeText(request.Attachment);
 
         var updated = await _repository.SaveInvoiceAsync(invoice, "updated", invoice.ApprovalStatus, invoice.ApprovalStatus, actorUserId.Value, null, null, cancellationToken);
@@ -156,6 +156,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         }
 
         invoice.ApprovalStatus = toStatus;
+        if (toStatus != NewInvoice.StatusApprovedHo) invoice.Points = 0;
         invoice.ApprovalRemark = NormalizeText(remark);
         var now = DateTime.UtcNow;
         if (toStatus == NewInvoice.StatusApprovedSs)
@@ -191,6 +192,7 @@ public sealed class NewInvoiceService : INewInvoiceService
 
         var fromStatus = invoice.ApprovalStatus;
         invoice.ApprovalStatus = NewInvoice.StatusRejected;
+        invoice.Points = 0;
         invoice.ApprovalRemark = remark.Trim();
         invoice.RejectedBy = actorUserId;
         invoice.RejectedAt = DateTime.UtcNow;

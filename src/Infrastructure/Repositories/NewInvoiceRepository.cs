@@ -435,8 +435,10 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         var minDate = schemes.Min(x => x.StartDate).ToDateTime(TimeOnly.MinValue);
         var maxDate = schemes.Max(x => x.EndDate).ToDateTime(TimeOnly.MaxValue);
 
+        // Slab eligibility is based only on finalized invoice turnover.
         return await _dbContext.NewInvoices.AsNoTracking()
             .Where(x => ids.Contains(x.SecondaryCustomerId)
+                && x.ApprovalStatus == NewInvoice.StatusApprovedHo
                 && x.InvoiceDate >= minDate
                 && x.InvoiceDate <= maxDate)
             .Select(x => new SchemeInvoiceAmount(x.Id, x.SecondaryCustomerId, x.InvoiceDate, x.Amount))
@@ -465,7 +467,8 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
     private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult, ApprovalStageSummary approvalSummary)
     {
-        var schemePoints = schemeResult?.Points ?? 0;
+        var pointsCreated = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo;
+        var schemePoints = pointsCreated ? schemeResult?.Points ?? 0 : 0;
         var isBooster = string.Equals(scheme?.SchemeTag, "Booster", StringComparison.OrdinalIgnoreCase);
         return new NewInvoiceDto
         {

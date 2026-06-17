@@ -988,7 +988,7 @@ public sealed class MasterDataRepository : IMasterDataRepository
         return true;
     }
 
-    public async Task<IReadOnlyCollection<LocationDetailsDto>> GetLocationDetailsAsync(string? pincode, ulong? cityId, string? city, CancellationToken cancellationToken)
+    public async Task<IReadOnlyCollection<LocationDetailsDto>> GetLocationDetailsAsync(string? pincode, ulong? stateId, ulong? cityId, string? city, CancellationToken cancellationToken)
     {
         var normalizedPincode = pincode?.Trim();
         var normalizedCity = city?.Trim();
@@ -998,7 +998,12 @@ public sealed class MasterDataRepository : IMasterDataRepository
             return await GetDetailsByPincodeAsync(normalizedPincode, cancellationToken);
         }
 
-        return await GetDetailsByCityAsync(cityId, normalizedCity, cancellationToken);
+        if (cityId.HasValue || !string.IsNullOrWhiteSpace(normalizedCity))
+        {
+            return await GetDetailsByCityAsync(cityId, normalizedCity, cancellationToken);
+        }
+
+        return await GetDetailsByStateAsync(stateId!.Value, cancellationToken);
     }
 
     private async Task<IReadOnlyCollection<LocationDetailsDto>> GetDetailsByPincodeAsync(string pincode, CancellationToken cancellationToken)
@@ -1038,6 +1043,36 @@ public sealed class MasterDataRepository : IMasterDataRepository
             orderby cityRow.CityName
             select new { city = cityRow, district, state, country })
             .Take(50)
+            .ToListAsync(cancellationToken);
+
+        var cityIds = rows.Select(x => x.city.Id).ToArray();
+        var pincodes = await _dbContext.Pincodes.AsNoTracking()
+            .Where(x => x.Active == "Y" && x.CityId.HasValue && cityIds.Contains(x.CityId.Value))
+            .OrderBy(x => x.PinCode)
+            .Select(x => new PincodeDto { Id = x.Id, Pincode = x.PinCode, CityId = x.CityId, Active = x.Active })
+            .ToListAsync(cancellationToken);
+
+        return rows.Select(row =>
+        {
+            var cityPincodes = pincodes.Where(x => x.CityId == row.city.Id).ToArray();
+            return ToLocationDetails(row.country, row.state, row.district, row.city, cityPincodes);
+        }).ToList();
+    }
+
+    private async Task<IReadOnlyCollection<LocationDetailsDto>> GetDetailsByStateAsync(ulong stateId, CancellationToken cancellationToken)
+    {
+        var rows = await (
+            from cityRow in _dbContext.Cities.AsNoTracking()
+            join district in _dbContext.Districts.AsNoTracking() on cityRow.DistrictId equals district.Id into districtJoin
+            from district in districtJoin.DefaultIfEmpty()
+            join state in _dbContext.States.AsNoTracking() on cityRow.StateId equals state.Id into stateJoin
+            from state in stateJoin.DefaultIfEmpty()
+            join country in _dbContext.Countries.AsNoTracking() on state.CountryId equals country.Id into countryJoin
+            from country in countryJoin.DefaultIfEmpty()
+            where cityRow.Active == "Y" && cityRow.StateId == stateId
+            orderby cityRow.CityName
+            select new { city = cityRow, district, state, country })
+            .Take(MaxCityRows)
             .ToListAsync(cancellationToken);
 
         var cityIds = rows.Select(x => x.city.Id).ToArray();

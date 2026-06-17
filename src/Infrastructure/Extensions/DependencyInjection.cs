@@ -17,7 +17,13 @@ public static class DependencyInjection
 
         var serverVersion = configuration["Database:MySqlVersion"] ?? "8.0.36";
         services.AddDbContext<AppDbContext>(options =>
-            options.UseMySql(connectionString, new MySqlServerVersion(Version.Parse(serverVersion))));
+            options.UseMySql(
+                connectionString,
+                new MySqlServerVersion(Version.Parse(serverVersion)),
+                mySqlOptions => mySqlOptions.EnableRetryOnFailure(
+                    maxRetryCount: 5,
+                    maxRetryDelay: TimeSpan.FromSeconds(10),
+                    errorNumbersToAdd: null)));
 
         services.AddScoped<IAuthRepository, AuthRepository>();
         services.AddScoped<IMasterDataRepository, MasterDataRepository>();

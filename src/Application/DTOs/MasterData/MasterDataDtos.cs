@@ -240,6 +240,7 @@ public sealed class LocationDetailsDto
 public sealed class LocationDetailsRequestDto
 {
     public string? Pincode { get; set; }
+    public ulong? StateId { get; set; }
     public ulong? CityId { get; set; }
     public string? City { get; set; }
 }
