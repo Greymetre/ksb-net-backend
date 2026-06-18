@@ -316,11 +316,12 @@ public sealed class MobileAppController : ControllerBase
         var customer = await CurrentCustomer(cancellationToken);
         if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
         var invoices = await CustomerInvoices(customer.Id, cancellationToken);
+        var (fromDate, toDate) = DateRange(filter.FromDate, filter.ToDate);
 
         if (!string.IsNullOrWhiteSpace(filter.Search)) invoices = invoices.Where(x => x.InvoiceNumber.Contains(filter.Search) || x.ShopName.Contains(filter.Search)).ToList();
         if (!string.IsNullOrWhiteSpace(filter.Status)) invoices = invoices.Where(x => InvoiceStatusMatches(x, filter.Status)).ToList();
-        if (filter.FromDate.HasValue) invoices = invoices.Where(x => x.InvoiceDate.Date >= filter.FromDate.Value.Date).ToList();
-        if (filter.ToDate.HasValue) invoices = invoices.Where(x => x.InvoiceDate.Date <= filter.ToDate.Value.Date).ToList();
+        if (fromDate.HasValue) invoices = invoices.Where(x => x.InvoiceDate.Date >= fromDate.Value.Date).ToList();
+        if (toDate.HasValue) invoices = invoices.Where(x => x.InvoiceDate.Date <= toDate.Value.Date).ToList();
 
         var page = Math.Max(1, filter.Page);
         var pageSize = Math.Clamp(filter.PageSize, 1, 100);
@@ -392,6 +393,7 @@ public sealed class MobileAppController : ControllerBase
 
         var query = _dbContext.LoyaltyRedemptions.AsNoTracking()
             .Where(x => x.DeletedAt == null && x.CustomerId == customer.Id);
+        var (fromDate, toDate) = DateRange(filter.FromDate, filter.ToDate);
 
         if (!string.IsNullOrWhiteSpace(filter.WalletType) && !string.Equals(filter.WalletType, "all", StringComparison.OrdinalIgnoreCase))
         {
@@ -408,8 +410,8 @@ public sealed class MobileAppController : ControllerBase
             query = query.Where(x => x.Status == status);
         }
 
-        if (filter.FromDate.HasValue) query = query.Where(x => x.CreatedAt.HasValue && x.CreatedAt.Value.Date >= filter.FromDate.Value.Date);
-        if (filter.ToDate.HasValue) query = query.Where(x => x.CreatedAt.HasValue && x.CreatedAt.Value.Date <= filter.ToDate.Value.Date);
+        if (fromDate.HasValue) query = query.Where(x => x.CreatedAt.HasValue && x.CreatedAt.Value.Date >= fromDate.Value.Date);
+        if (toDate.HasValue) query = query.Where(x => x.CreatedAt.HasValue && x.CreatedAt.Value.Date <= toDate.Value.Date);
 
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
@@ -490,7 +492,7 @@ public sealed class MobileAppController : ControllerBase
     public async Task<IActionResult> Profile(CancellationToken cancellationToken)
     {
         var customer = await CurrentCustomer(cancellationToken);
-        return customer is null ? Unauthorized(new { status = "error", message = "Unauthenticated." }) : Ok(new { status = "success", data = ToProfile(customer) });
+        return customer is null ? Unauthorized(new { status = "error", message = "Unauthenticated." }) : Ok(await ToMobileProfile(customer, cancellationToken));
     }
 
     [Authorize]
@@ -514,7 +516,7 @@ public sealed class MobileAppController : ControllerBase
         customer.CustomFields = JsonSerializer.Serialize(fields, JsonOptions);
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
-        return Ok(new { status = "success", message = "Profile updated successfully.", data = ToProfile(customer) });
+        return Ok(await ToMobileProfile(customer, cancellationToken));
     }
 
     [Authorize]
@@ -556,6 +558,22 @@ public sealed class MobileAppController : ControllerBase
     {
         var invoices = await _invoiceRepository.GetInvoicesAsync(new NewInvoiceFilterDto(), null, cancellationToken);
         return invoices.Where(x => x.SecondaryCustomerId == customerId).ToList();
+    }
+
+    private (DateTime? FromDate, DateTime? ToDate) DateRange(DateTime? fromDate, DateTime? toDate) =>
+        (fromDate ?? QueryDate("from_date", "date_from", "start_date"),
+            toDate ?? QueryDate("to_date", "date_to", "end_date"));
+
+    private DateTime? QueryDate(params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (!Request.Query.TryGetValue(key, out var values)) continue;
+            var value = values.FirstOrDefault();
+            if (DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed)) return parsed;
+        }
+
+        return null;
     }
 
     private static IReadOnlyCollection<MobileInvoiceListItemDto> BuildInvoiceListItems(IReadOnlyCollection<NewInvoiceDto> invoices)
@@ -1009,6 +1027,71 @@ public sealed class MobileAppController : ControllerBase
         };
     }
 
+    private async Task<object> ToMobileProfile(Customer customer, CancellationToken cancellationToken)
+    {
+        var fields = ReadFields(customer);
+        var cityId = Field(fields, "city_id");
+        var stateId = Field(fields, "state_id");
+        var pincodeId = Field(fields, "pincode_id");
+
+        return new
+        {
+            id = customer.Id,
+            owner_name = Field(fields, "owner_name") ?? customer.FirstName ?? string.Empty,
+            shop_name = Field(fields, "shop_name") ?? customer.Name ?? string.Empty,
+            mobile = customer.Mobile ?? string.Empty,
+            email = customer.Email ?? string.Empty,
+            customer_type_name = customer.CustomerType == InfluencerType ? "Influencers" : "Retailer",
+            kyc = new { status = KycStatusValue(fields) },
+            custom_fields = new
+            {
+                gst_number = FirstField(fields, "gst_number", "gstin_no") ?? string.Empty,
+                address_line = FirstField(fields, "address_line", "address") ?? string.Empty,
+                city_id = cityId ?? string.Empty,
+                city_name = Field(fields, "city_name") ?? await CityName(cityId, cancellationToken) ?? string.Empty,
+                state_id = stateId ?? string.Empty,
+                state_name = Field(fields, "state_name") ?? await StateName(stateId, cancellationToken) ?? string.Empty,
+                pincode_id = pincodeId ?? string.Empty,
+                pincode = Field(fields, "pincode") ?? await Pincode(pincodeId, cancellationToken) ?? string.Empty
+            }
+        };
+    }
+
+    private static string KycStatusValue(IReadOnlyDictionary<string, string?> fields)
+    {
+        var documents = new[] { "gst", "pan", "aadhar", "bank" };
+        var uploaded = documents.Count(x => !string.IsNullOrWhiteSpace(Field(fields, $"{x}_attachment")) || !string.IsNullOrWhiteSpace(Field(fields, x == "bank" ? "bank_proof" : $"{x}_attachment")));
+        var approved = documents.Count(x => string.Equals(Field(fields, $"{x}_kyc_status"), "approved", StringComparison.OrdinalIgnoreCase));
+        return approved == documents.Length ? "approved" : uploaded > 0 ? "pending" : "missing";
+    }
+
+    private async Task<string?> CityName(string? cityId, CancellationToken cancellationToken)
+    {
+        if (!ulong.TryParse(cityId, out var id)) return null;
+        return await _dbContext.Cities.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => x.CityName)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<string?> StateName(string? stateId, CancellationToken cancellationToken)
+    {
+        if (!ulong.TryParse(stateId, out var id)) return null;
+        return await _dbContext.States.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => x.StateName)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private async Task<string?> Pincode(string? pincodeId, CancellationToken cancellationToken)
+    {
+        if (!ulong.TryParse(pincodeId, out var id)) return null;
+        return await _dbContext.Pincodes.AsNoTracking()
+            .Where(x => x.Id == id)
+            .Select(x => x.PinCode)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     private object BuildMobileKyc(Customer customer, IReadOnlyDictionary<string, string?> fields)
     {
         var documents = new[]
@@ -1403,10 +1486,10 @@ public sealed class MobileAppController : ControllerBase
     {
         public string? Search { get; set; }
         public string? Status { get; set; }
-        public DateTime? FromDate { get; set; }
-        public DateTime? ToDate { get; set; }
+        [FromQuery(Name = "from_date")] public DateTime? FromDate { get; set; }
+        [FromQuery(Name = "to_date")] public DateTime? ToDate { get; set; }
         public int Page { get; set; } = 1;
-        public int PageSize { get; set; } = 20;
+        [FromQuery(Name = "page_size")] public int PageSize { get; set; } = 20;
     }
 
     public sealed class MobileRedemptionRequest
