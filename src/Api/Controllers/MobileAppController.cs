@@ -584,7 +584,7 @@ public sealed class MobileAppController : ControllerBase
             {
                 var invoice = group.OrderByDescending(x => x.SchemePoints).First();
                 var rewardAmount = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo ? group.Sum(x => x.SchemePoints) : 0;
-                var displayDate = invoice.CreatedAt ?? invoice.InvoiceDate;
+                var displayDate = invoice.InvoiceDate;
                 var statusKey = InvoiceStatusKey(invoice.ApprovalStatus);
                 return new MobileInvoiceListItemDto
                 {
