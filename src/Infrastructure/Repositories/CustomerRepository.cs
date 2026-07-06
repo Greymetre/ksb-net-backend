@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using Application.DTOs.Customers;
 using Application.Interfaces.Repositories;
@@ -57,6 +58,7 @@ public sealed class CustomerRepository : ICustomerRepository
             .ToListAsync(cancellationToken);
 
         var customers = rows.Select(row => ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName)).ToList();
+        await AttachAddressFallbackAsync(customers, cancellationToken);
         customers = ApplyJsonFilters(customers, filter).ToList();
         await AttachAddressNamesAsync(customers, cancellationToken);
         await AttachLookupNamesAsync(customers, cancellationToken);
@@ -77,6 +79,7 @@ public sealed class CustomerRepository : ICustomerRepository
 
         if (row is null) return null;
         var dto = ToCustomerDto(row.Customer, row.CreatedByName, row.ParentName);
+        await AttachAddressFallbackAsync([dto], cancellationToken);
         await AttachAddressNamesAsync([dto], cancellationToken);
         await AttachLookupNamesAsync([dto], cancellationToken);
         await AttachPointSummaryAsync(dto, row.Customer, cancellationToken);
@@ -104,6 +107,7 @@ public sealed class CustomerRepository : ICustomerRepository
             SapCode = NormalizeText(request.SapCode),
             ManagerName = NormalizeText(request.ManagerName) ?? string.Empty,
             ManagerPhone = NormalizeText(request.ManagerPhone) ?? string.Empty,
+            ExecutiveId = FirstAssignedUserId(request.AssignedUserIds),
             CustomFields = SerializeFields(request.CustomFields),
             CreatedBy = actorUserId,
             CreatedAt = now,
@@ -112,6 +116,8 @@ public sealed class CustomerRepository : ICustomerRepository
 
         await _dbContext.Customers.AddAsync(customer, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await SyncCustomerRelatedTablesAsync(customer.Id, request.CustomFields, actorUserId, cancellationToken);
+        await SyncCustomerAssignmentsAsync(customer.Id, request.AssignedUserIds, actorUserId, cancellationToken);
         return ToCustomerDto(customer, null, null);
     }
 
@@ -135,6 +141,7 @@ public sealed class CustomerRepository : ICustomerRepository
         if (request.SapCode is not null) customer.SapCode = NormalizeText(request.SapCode);
         if (request.ManagerName is not null) customer.ManagerName = NormalizeText(request.ManagerName) ?? string.Empty;
         if (request.ManagerPhone is not null) customer.ManagerPhone = NormalizeText(request.ManagerPhone) ?? string.Empty;
+        if (request.AssignedUserIds is not null && request.AssignedUserIds.Count > 0) customer.ExecutiveId = FirstAssignedUserId(request.AssignedUserIds);
         if (request.CustomFields is not null) customer.CustomFields = SerializeFields(request.CustomFields);
 
         var active = NormalizeActive(request.Active);
@@ -143,6 +150,8 @@ public sealed class CustomerRepository : ICustomerRepository
         customer.UpdatedAt = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await SyncCustomerRelatedTablesAsync(customer.Id, request.CustomFields, actorUserId, cancellationToken);
+        await SyncCustomerAssignmentsAsync(customer.Id, request.AssignedUserIds, actorUserId, cancellationToken);
         return ToCustomerDto(customer, null, null);
     }
 
@@ -177,6 +186,31 @@ public sealed class CustomerRepository : ICustomerRepository
 
         var dto = ToCustomerDto(customer, null, null);
         await AttachAddressNamesAsync([dto], cancellationToken);
+        await AttachPointSummaryAsync(dto, customer, cancellationToken);
+        return dto;
+    }
+
+    public async Task<CustomerDto?> SetRetailerApprovalStatusAsync(ulong id, string status, string? remark, ulong actorUserId, CancellationToken cancellationToken)
+    {
+        var customer = await _dbContext.Customers.FirstOrDefaultAsync(x => x.Id == id && x.DeletedAt == null, cancellationToken);
+        if (customer is null || !IsRetailerCustomer(customer)) return null;
+
+        var fields = DeserializeFields(customer.CustomFields);
+        fields["status"] = status;
+        fields["remark"] = NormalizeText(remark);
+        fields["approve_reject_by"] = actorUserId.ToString();
+        fields["status_updated_at"] = DateTime.UtcNow.ToString("O");
+
+        customer.CustomFields = SerializeFields(fields);
+        customer.UpdatedBy = actorUserId;
+        customer.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        await UpsertRetailerApprovalStatusAsync(customer.Id, status, cancellationToken);
+
+        var dto = ToCustomerDto(customer, null, null);
+        await AttachAddressFallbackAsync([dto], cancellationToken);
+        await AttachAddressNamesAsync([dto], cancellationToken);
+        await AttachLookupNamesAsync([dto], cancellationToken);
         await AttachPointSummaryAsync(dto, customer, cancellationToken);
         return dto;
     }
@@ -312,6 +346,174 @@ public sealed class CustomerRepository : ICustomerRepository
     public async Task<bool> EmailExistsAsync(string email, ulong? exceptId, CancellationToken cancellationToken) =>
         await _dbContext.Customers.AnyAsync(x => x.DeletedAt == null && x.Email == email && (!exceptId.HasValue || x.Id != exceptId), cancellationToken);
 
+    private static ulong? FirstAssignedUserId(IReadOnlyCollection<ulong>? userIds)
+    {
+        var userId = userIds?.FirstOrDefault(id => id > 0) ?? 0;
+        return userId > 0 ? userId : null;
+    }
+
+    private async Task SyncCustomerAssignmentsAsync(ulong customerId, IReadOnlyCollection<ulong>? assignedUserIds, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (assignedUserIds is null) return;
+
+        var userIds = assignedUserIds.Where(id => id > 0).Distinct().ToArray();
+        if (userIds.Length == 0) return;
+
+        var idsCsv = string.Join(',', userIds);
+        await _dbContext.Database.ExecuteSqlRawAsync(
+            $@"UPDATE employee_details
+SET deleted_at = UTC_TIMESTAMP(), updated_by = {{0}}, updated_at = UTC_TIMESTAMP()
+WHERE customer_id = {{1}} AND deleted_at IS NULL AND (user_id IS NULL OR user_id NOT IN ({idsCsv}))",
+            [actorUserId, customerId],
+            cancellationToken);
+
+        foreach (var userId in userIds)
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                @"UPDATE employee_details
+SET active = 'Y', deleted_at = NULL, updated_by = {2}, updated_at = UTC_TIMESTAMP()
+WHERE customer_id = {0} AND user_id = {1} AND deleted_at IS NOT NULL",
+                [customerId, userId, actorUserId],
+                cancellationToken);
+
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                @"INSERT INTO employee_details (active, customer_id, user_id, created_by, created_at, updated_at)
+SELECT 'Y', {0}, {1}, {2}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
+WHERE EXISTS (SELECT 1 FROM users WHERE id = {1} AND deleted_at IS NULL)
+AND NOT EXISTS (
+    SELECT 1 FROM employee_details
+    WHERE customer_id = {0} AND user_id = {1} AND deleted_at IS NULL
+)",
+                [customerId, userId, actorUserId],
+                cancellationToken);
+        }
+    }
+
+    private async Task SyncCustomerRelatedTablesAsync(ulong customerId, IReadOnlyDictionary<string, string?>? fields, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (fields is null) return;
+        await SyncCustomerAddressAsync(customerId, fields, actorUserId, cancellationToken);
+        await SyncCustomerDetailsAsync(customerId, fields, cancellationToken);
+        await SyncBeatCustomerAsync(customerId, fields, cancellationToken);
+    }
+
+    private async Task SyncCustomerAddressAsync(ulong customerId, IReadOnlyDictionary<string, string?> fields, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        var address1 = FirstNonBlank(ReadField(fields, "address_line"), ReadField(fields, "address1"), ReadField(fields, "billing_address"));
+        var address2 = FirstNonBlank(ReadField(fields, "shipping_address"), ReadField(fields, "address2"));
+        var countryId = ReadULong(fields, "country_id") ?? ReadULong(fields, "billing_country");
+        var stateId = ReadULong(fields, "state_id") ?? ReadULong(fields, "billing_state");
+        var districtId = ReadULong(fields, "district_id") ?? ReadULong(fields, "billing_district");
+        var cityId = ReadULong(fields, "city_id") ?? ReadULong(fields, "billing_city");
+        var pincodeId = ReadULong(fields, "pincode_id") ?? ReadULong(fields, "billing_pincode");
+
+        if (string.IsNullOrWhiteSpace(address1) && string.IsNullOrWhiteSpace(address2) && !countryId.HasValue && !stateId.HasValue && !districtId.HasValue && !cityId.HasValue && !pincodeId.HasValue) return;
+
+        var existingId = await QueryScalarLongAsync("SELECT COALESCE(MAX(id), 0) FROM addresses WHERE customer_id = {0} AND deleted_at IS NULL", [customerId], cancellationToken);
+        if (existingId > 0)
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                @"UPDATE addresses SET address1 = {0}, address2 = {1}, country_id = {2}, state_id = {3}, district_id = {4}, city_id = {5}, pincode_id = {6}, updated_at = UTC_TIMESTAMP()
+WHERE id = {7}",
+                [address1 ?? string.Empty, address2 ?? string.Empty, countryId, stateId, districtId, cityId, pincodeId, existingId],
+                cancellationToken);
+            return;
+        }
+
+        await _dbContext.Database.ExecuteSqlRawAsync(
+            @"INSERT INTO addresses (active, customer_id, address1, address2, country_id, state_id, district_id, city_id, pincode_id, created_by, created_at, updated_at)
+VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            [customerId, address1 ?? string.Empty, address2 ?? string.Empty, countryId, stateId, districtId, cityId, pincodeId, actorUserId],
+            cancellationToken);
+    }
+
+    private async Task SyncCustomerDetailsAsync(ulong customerId, IReadOnlyDictionary<string, string?> fields, CancellationToken cancellationToken)
+    {
+        var gst = FirstNonBlank(ReadField(fields, "gst_number"), ReadField(fields, "gstin_no"));
+        var pan = FirstNonBlank(ReadField(fields, "pan_number"), ReadField(fields, "pan_no"));
+        var aadhar = ReadField(fields, "aadhar_no");
+        var accountHolder = FirstNonBlank(ReadField(fields, "account_holder_name"), ReadField(fields, "account_holder"));
+        var accountNumber = FirstNonBlank(ReadField(fields, "bank_account_number"), ReadField(fields, "account_number"));
+        var bankName = ReadField(fields, "bank_name");
+        var ifscCode = FirstNonBlank(ReadField(fields, "ifsc_code"), ReadField(fields, "ifsc"));
+        var shopImage = FirstNonBlank(ReadField(fields, "shop_photo"), ReadField(fields, "shop_image"));
+        var visitStatus = FirstNonBlank(ReadField(fields, "business_status"), ReadField(fields, "status"));
+
+        if (new[] { gst, pan, aadhar, accountHolder, accountNumber, bankName, ifscCode, shopImage, visitStatus }.All(string.IsNullOrWhiteSpace)) return;
+
+        var existingId = await QueryScalarLongAsync("SELECT COALESCE(MAX(id), 0) FROM customer_details WHERE customer_id = {0} AND deleted_at IS NULL", [customerId], cancellationToken);
+        if (existingId > 0)
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                @"UPDATE customer_details SET gstin_no = {0}, pan_no = {1}, aadhar_no = {2}, account_holder = {3}, account_number = {4}, bank_name = {5}, ifsc_code = {6}, shop_image = {7}, visit_status = {8}, updated_at = UTC_TIMESTAMP()
+WHERE id = {9}",
+                [gst, pan, aadhar, accountHolder, accountNumber, bankName, ifscCode, shopImage ?? string.Empty, visitStatus ?? string.Empty, existingId],
+                cancellationToken);
+            return;
+        }
+
+        await _dbContext.Database.ExecuteSqlRawAsync(
+            @"INSERT INTO customer_details (active, customer_id, gstin_no, pan_no, aadhar_no, account_holder, account_number, bank_name, ifsc_code, shop_image, visit_status, created_at, updated_at)
+VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, {7}, {8}, {9}, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            [customerId, gst, pan, aadhar, accountHolder, accountNumber, bankName, ifscCode, shopImage ?? string.Empty, visitStatus ?? string.Empty],
+            cancellationToken);
+    }
+
+    private async Task UpsertRetailerApprovalStatusAsync(ulong customerId, string status, CancellationToken cancellationToken)
+    {
+        var existingId = await QueryScalarLongAsync("SELECT COALESCE(MAX(id), 0) FROM customer_details WHERE customer_id = {0} AND deleted_at IS NULL", [customerId], cancellationToken);
+        if (existingId > 0)
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                "UPDATE customer_details SET visit_status = {0}, updated_at = UTC_TIMESTAMP() WHERE id = {1}",
+                [status, existingId],
+                cancellationToken);
+            return;
+        }
+
+        await _dbContext.Database.ExecuteSqlRawAsync(
+            "INSERT INTO customer_details (active, customer_id, visit_status, created_at, updated_at) VALUES ('Y', {0}, {1}, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            [customerId, status],
+            cancellationToken);
+    }
+
+    private async Task SyncBeatCustomerAsync(ulong customerId, IReadOnlyDictionary<string, string?> fields, CancellationToken cancellationToken)
+    {
+        var beatId = ReadULong(fields, "beat_id");
+        if (!beatId.HasValue) return;
+
+        var existingId = await QueryScalarLongAsync("SELECT COALESCE(MAX(id), 0) FROM beat_customers WHERE customer_id = {0}", [customerId], cancellationToken);
+        if (existingId > 0)
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync("UPDATE beat_customers SET active = 'Y', beat_id = {0}, updated_at = UTC_TIMESTAMP() WHERE id = {1}", [beatId, existingId], cancellationToken);
+            return;
+        }
+
+        await _dbContext.Database.ExecuteSqlRawAsync(
+            "INSERT INTO beat_customers (active, beat_id, customer_id, created_at, updated_at) VALUES ('Y', {0}, {1}, UTC_TIMESTAMP(), UTC_TIMESTAMP())",
+            [beatId, customerId],
+            cancellationToken);
+    }
+
+    private async Task<long> QueryScalarLongAsync(string sql, object?[] parameters, CancellationToken cancellationToken)
+    {
+        var connection = _dbContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open) await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = sql;
+        for (var index = 0; index < parameters.Length; index++)
+        {
+            var parameter = command.CreateParameter();
+            parameter.ParameterName = "p" + index;
+            parameter.Value = parameters[index] ?? DBNull.Value;
+            command.Parameters.Add(parameter);
+            command.CommandText = command.CommandText.Replace("{" + index + "}", "@" + parameter.ParameterName, StringComparison.Ordinal);
+        }
+
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? 0 : Convert.ToInt64(value);
+    }
+
     private static IEnumerable<CustomerDto> ApplyJsonFilters(IEnumerable<CustomerDto> customers, CustomerListFilterDto filter)
     {
         if (filter.StateId.HasValue) customers = customers.Where(x => x.StateId == filter.StateId);
@@ -341,6 +543,56 @@ public sealed class CustomerRepository : ICustomerRepository
             if (customer.DistrictId.HasValue && districts.TryGetValue(customer.DistrictId.Value, out var district)) customer.DistrictName = district;
             if (customer.CityId.HasValue && cities.TryGetValue(customer.CityId.Value, out var city)) customer.CityName = city;
             if (customer.PincodeId.HasValue && pincodes.TryGetValue(customer.PincodeId.Value, out var pincode)) customer.Pincode = pincode;
+        }
+    }
+
+    private async Task AttachAddressFallbackAsync(IReadOnlyCollection<CustomerDto> customers, CancellationToken cancellationToken)
+    {
+        var customerIds = customers
+            .Where(customer => !customer.CountryId.HasValue || !customer.StateId.HasValue || !customer.DistrictId.HasValue || !customer.CityId.HasValue || !customer.PincodeId.HasValue)
+            .Select(customer => customer.Id)
+            .Distinct()
+            .ToArray();
+        if (customerIds.Length == 0) return;
+
+        var idCsv = string.Join(',', customerIds);
+        var connection = _dbContext.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open) await connection.OpenAsync(cancellationToken);
+        await using var command = connection.CreateCommand();
+        command.CommandText = $@"SELECT a.customer_id, a.address1, a.country_id, a.state_id, a.district_id, a.city_id, a.pincode_id
+FROM addresses a
+INNER JOIN (
+    SELECT customer_id, MAX(id) AS id
+    FROM addresses
+    WHERE deleted_at IS NULL AND customer_id IN ({idCsv})
+    GROUP BY customer_id
+) latest ON latest.id = a.id";
+
+        var addressRows = new Dictionary<ulong, Dictionary<string, object?>>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+            for (var index = 0; index < reader.FieldCount; index++) row[reader.GetName(index)] = reader.IsDBNull(index) ? null : reader.GetValue(index);
+            var customerId = ToULong(row, "customer_id");
+            if (customerId > 0) addressRows[customerId] = row;
+        }
+
+        foreach (var customer in customers)
+        {
+            if (!addressRows.TryGetValue(customer.Id, out var row)) continue;
+            customer.CountryId ??= ToNullableULong(row, "country_id");
+            customer.StateId ??= ToNullableULong(row, "state_id");
+            customer.DistrictId ??= ToNullableULong(row, "district_id");
+            customer.CityId ??= ToNullableULong(row, "city_id");
+            customer.PincodeId ??= ToNullableULong(row, "pincode_id");
+            SetFieldIfPresent(customer.CustomFields, "address_line", ToStringValue(row, "address1"));
+            SetFieldIfPresent(customer.CustomFields, "address1", ToStringValue(row, "address1"));
+            SetFieldIfPresent(customer.CustomFields, "country_id", customer.CountryId?.ToString());
+            SetFieldIfPresent(customer.CustomFields, "state_id", customer.StateId?.ToString());
+            SetFieldIfPresent(customer.CustomFields, "district_id", customer.DistrictId?.ToString());
+            SetFieldIfPresent(customer.CustomFields, "city_id", customer.CityId?.ToString());
+            SetFieldIfPresent(customer.CustomFields, "pincode_id", customer.PincodeId?.ToString());
         }
     }
 
@@ -582,6 +834,20 @@ public sealed class CustomerRepository : ICustomerRepository
         _ => $"Type {type}"
     };
 
+    private static bool IsRetailerCustomer(Customer customer)
+    {
+        if (customer.CustomerType == 2) return true;
+        var fields = DeserializeFields(customer.CustomFields);
+        var type = ReadField(fields, "customer_type");
+        return string.Equals(type, "2", StringComparison.OrdinalIgnoreCase)
+            || ContainsRetailer(ReadField(fields, "customer_type_name"))
+            || ContainsRetailer(ReadField(fields, "type"))
+            || ContainsRetailer(ReadField(fields, "type_name"));
+    }
+
+    private static bool ContainsRetailer(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.Contains("retailer", StringComparison.OrdinalIgnoreCase);
+
     private static string? ReadField(IReadOnlyDictionary<string, string?>? fields, string key) =>
         fields is not null && fields.TryGetValue(key, out var value) ? value : null;
 
@@ -599,6 +865,23 @@ public sealed class CustomerRepository : ICustomerRepository
 
     private static ulong? ReadULong(IReadOnlyDictionary<string, string?> fields, string key) =>
         ulong.TryParse(ReadField(fields, key), out var parsed) ? parsed : null;
+
+    private static void SetFieldIfPresent(IDictionary<string, string?> fields, string key, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value)) fields[key] = value.Trim();
+    }
+
+    private static string? ToStringValue(IReadOnlyDictionary<string, object?> row, string key) =>
+        row.TryGetValue(key, out var value) && value is not null and not DBNull ? Convert.ToString(value) : null;
+
+    private static ulong ToULong(IReadOnlyDictionary<string, object?> row, string key) =>
+        ulong.TryParse(ToStringValue(row, key), out var parsed) ? parsed : 0;
+
+    private static ulong? ToNullableULong(IReadOnlyDictionary<string, object?> row, string key)
+    {
+        var value = ToULong(row, key);
+        return value > 0 ? value : null;
+    }
 
     private static ulong? FirstULong(string? value)
     {

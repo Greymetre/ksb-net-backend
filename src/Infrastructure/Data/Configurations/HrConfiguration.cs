@@ -155,6 +155,7 @@ public sealed class AttendanceConfiguration : IEntityTypeConfiguration<Attendanc
         builder.Property(x => x.ApproveRejectBy).HasColumnName("approve_reject_by");
         builder.Property(x => x.PunchinFrom).HasColumnName("punchin_from");
         builder.Property(x => x.Flag).HasColumnName("flag");
+        builder.Property(x => x.BeatId).HasColumnName("beat_id");
         builder.Property(x => x.TourId).HasColumnName("tourid");
         builder.Property(x => x.City).HasColumnName("city");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");

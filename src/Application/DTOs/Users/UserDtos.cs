@@ -82,6 +82,8 @@ public sealed class UserRequestDto
     public ulong? ReportingId { get; set; }
     public string? Location { get; set; }
     public string? BaseLocationCoordinates { get; set; }
+    public string? CurrentAddress { get; set; }
+    public string? PermanentAddress { get; set; }
     public string? Payroll { get; set; }
     public ulong? WarehouseId { get; set; }
     public string? SalesType { get; set; }

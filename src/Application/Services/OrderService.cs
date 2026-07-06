@@ -106,6 +106,108 @@ public sealed class OrderService : IOrderService
         return LaravelApiResponse.Success("order", await _repository.GetOrderAsync(order.Id, cancellationToken), "Order Created Successfully");
     }
 
+    public async Task<LaravelApiResponse> UpdateOrderAsync(ulong id, OrderRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        RequireId(request.SellerId, "Dealer / Distributor is required.");
+        RequireId(request.ExecutiveId, "Employee is required.");
+        RequireValue(request.Type, "Customer Type is required.");
+
+        var order = await _repository.GetOrderEntityAsync(id, cancellationToken) ?? throw NotFound("Order not found");
+        var rows = request.OrderDetail.Where(x => x.ProductId.HasValue && (x.Quantity ?? 0) > 0).ToArray();
+        if (rows.Length == 0) throw BadRequest("At least one valid product row is required.");
+
+        var type = request.Type!.Trim().ToUpperInvariant();
+        if (type != "DISTRIBUTER") RequireId(request.BuyerId, "Customer is required.");
+
+        var now = DateTime.Now;
+        order.BuyerId = type == "DISTRIBUTER" ? null : request.BuyerId;
+        order.SellerId = request.SellerId;
+        order.ExecutiveId = request.ExecutiveId;
+        order.TotalQty = ToLongQuantity(request.TotalQty ?? rows.Sum(x => x.Quantity ?? 0));
+        order.OrderDate = request.OrderDate?.Date ?? order.OrderDate;
+        order.TotalGst = request.TotalGst ?? rows.Sum(x => x.TaxAmount ?? 0);
+        order.SubTotal = request.SubTotal ?? rows.Sum(x => x.LineTotal ?? 0);
+        order.GrandTotal = request.GrandTotal ?? rows.Sum(x => x.LineTotal ?? 0);
+        order.OrderType = type == "DISTRIBUTER" ? "MASTER_DISTRIBUTER" : "SECONDARY_CUSTOMER";
+        order.OrderRemark = request.OrderRemark;
+        order.UpdatedBy = actorUserId;
+        order.UpdatedAt = now;
+
+        var existingDetails = await _repository.GetOrderDetailEntitiesAsync(id, cancellationToken);
+        _repository.RemoveOrderDetails(existingDetails);
+        await _repository.AddOrderDetailsAsync(rows.Select(row =>
+        {
+            var lineTotal = row.LineTotal ?? ((row.Quantity ?? 0) * (row.Mrp ?? 0));
+            var tax = row.TaxAmount ?? 0;
+            return new OrderDetail
+            {
+                Active = "Y",
+                OrderId = id,
+                ProductId = row.ProductId,
+                ProductDetailId = row.ProductDetail,
+                Quantity = ToLongQuantity(row.Quantity),
+                ShippedQty = 0,
+                Price = row.Mrp ?? 0,
+                Gst = row.Gst ?? 0,
+                TaxAmount = tax,
+                LineTotal = lineTotal,
+                GstAmount = lineTotal + tax,
+                SubcategoryId = row.SubcategoryId,
+                CategoryId = row.CategoryId,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+        }).ToArray(), cancellationToken);
+
+        await _repository.SaveChangesAsync(cancellationToken);
+        return LaravelApiResponse.Success("order", await _repository.GetOrderAsync(id, cancellationToken), "Order Updated Successfully");
+    }
+
+    public async Task<LaravelApiResponse> DeleteOrderAsync(ulong id, CancellationToken cancellationToken)
+    {
+        if (!await _repository.DeleteOrderAsync(id, cancellationToken)) throw NotFound("Order not found");
+        return LaravelApiResponse.MessageOnly("success", "Order deleted successfully!");
+    }
+
+    public async Task<LaravelApiResponse> SetActiveAsync(ulong id, OrderActiveRequestDto request, CancellationToken cancellationToken)
+    {
+        var order = await _repository.GetOrderEntityAsync(id, cancellationToken) ?? throw NotFound("Order not found");
+        order.Active = string.Equals(request.Active, "Y", StringComparison.OrdinalIgnoreCase) ? "Y" : "N";
+        order.UpdatedAt = DateTime.Now;
+        await _repository.SaveChangesAsync(cancellationToken);
+        return LaravelApiResponse.Success("order", await _repository.GetOrderAsync(id, cancellationToken), "Status changed successfully");
+    }
+
+    public async Task<LaravelApiResponse> SetStatusAsync(ulong id, OrderStatusRequestDto request, CancellationToken cancellationToken)
+    {
+        var order = await _repository.GetOrderEntityAsync(id, cancellationToken) ?? throw NotFound("Order not found");
+        var details = await _repository.GetOrderDetailEntitiesAsync(id, cancellationToken);
+        var now = DateTime.Now;
+        order.StatusId = request.StatusId == 0 ? null : request.StatusId;
+        order.OrderRemark = string.IsNullOrWhiteSpace(request.Remark) ? order.OrderRemark : request.Remark;
+        order.ShippedQty = order.StatusId == 1 ? order.TotalQty : order.StatusId == 2 ? Math.Max(0, details.Sum(x => x.ShippedQty)) : 0;
+        order.CompletedDate = order.StatusId == 1 ? now.Date : order.CompletedDate;
+        order.UpdatedAt = now;
+
+        foreach (var detail in details)
+        {
+            detail.StatusId = order.StatusId;
+            detail.ShippedQty = order.StatusId == 1 ? detail.Quantity : order.StatusId is null ? 0 : detail.ShippedQty;
+            detail.UpdatedAt = now;
+        }
+
+        await _repository.SaveChangesAsync(cancellationToken);
+        var message = order.StatusId switch
+        {
+            1 => "Order dispatched successfully !!",
+            2 => "Order partially dispatched successfully !!",
+            4 => "Order cancle successfully !!",
+            null => "Order pendding successfully !!",
+            _ => "Order status updated successfully !!"
+        };
+        return LaravelApiResponse.Success("order", await _repository.GetOrderAsync(id, cancellationToken), message);
+    }
+
     public async Task<MasterDataFileDto> ExportOrdersAsync(OrderFilterDto filter, CancellationToken cancellationToken)
     {
         var rows = await _repository.GetOrderExportRowsAsync(filter, cancellationToken);

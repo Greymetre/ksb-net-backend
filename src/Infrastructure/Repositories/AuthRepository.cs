@@ -20,6 +20,11 @@ public sealed class AuthRepository : IAuthRepository
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(x => x.Mobile == username || x.Email == username, cancellationToken);
 
+    public Task<User?> FindUserByIdAsync(ulong userId, CancellationToken cancellationToken) =>
+        _dbContext.Users
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Id == userId, cancellationToken);
+
     public Task<Customer?> FindCustomerByUsernameAsync(string username, CancellationToken cancellationToken)
     {
         var normalized = "91" + username.TrimStart('0', '+');
@@ -127,6 +132,9 @@ public sealed class AuthRepository : IAuthRepository
 
     public async Task StoreTokenAsync(OAuthAccessToken token, CancellationToken cancellationToken) =>
         await _dbContext.OAuthAccessTokens.AddAsync(token, cancellationToken);
+
+    public Task<OAuthAccessToken?> FindTokenByIdAsync(string tokenId, CancellationToken cancellationToken) =>
+        _dbContext.OAuthAccessTokens.FirstOrDefaultAsync(x => x.Id == tokenId, cancellationToken);
 
     public async Task RevokeTokenAsync(string tokenId, CancellationToken cancellationToken)
     {

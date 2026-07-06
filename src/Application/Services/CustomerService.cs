@@ -11,6 +11,8 @@ namespace Application.Services;
 
 public sealed class CustomerService : ICustomerService
 {
+    private static readonly string[] AssignmentFieldKeys = ["employee_id", "sales_executive_id", "supervisor_id"];
+
     private static readonly string[] DistributorExportColumns =
     [
         "id", "customer_type", "name", "mobile", "email", "customer_code", "contact_number", "active",
@@ -71,6 +73,7 @@ public sealed class CustomerService : ICustomerService
     public async Task<LaravelApiResponse> CreateCustomerAsync(CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         NormalizeRequest(request);
+        ResolveAssignedUsers(request, actorUserId, defaultToActor: true);
         await ValidateAsync(request, null, cancellationToken);
         var customer = await _repository.CreateCustomerAsync(request, actorUserId, cancellationToken);
         await _repository.EnsureDistributorLoginUserAsync(customer.Id, actorUserId, cancellationToken);
@@ -80,6 +83,7 @@ public sealed class CustomerService : ICustomerService
     public async Task<LaravelApiResponse> UpdateCustomerAsync(ulong id, CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         NormalizeRequest(request);
+        ResolveAssignedUsers(request, actorUserId, defaultToActor: false);
         await ValidateAsync(request, id, cancellationToken);
         var customer = await _repository.UpdateCustomerAsync(id, request, actorUserId, cancellationToken);
         if (customer is not null) await _repository.EnsureDistributorLoginUserAsync(customer.Id, actorUserId, cancellationToken);
@@ -102,6 +106,19 @@ public sealed class CustomerService : ICustomerService
         var key = NormalizeKycDocumentKey(documentKey);
         var customer = await _repository.UpdateKycStatusAsync(id, key, "rejected", remark, actorUserId.Value, cancellationToken);
         return LaravelApiResponse.Success("customer", customer ?? throw NotFound("Customer not found"), "KYC document rejected successfully");
+    }
+
+    public async Task<LaravelApiResponse> SetRetailerApprovalStatusAsync(ulong id, string? status, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw new LaravelHttpException(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var normalizedStatus = NormalizeApprovalStatus(status);
+        var customer = await _repository.SetRetailerApprovalStatusAsync(
+            id,
+            normalizedStatus,
+            normalizedStatus.Equals("REJECTED", StringComparison.OrdinalIgnoreCase) ? remark : null,
+            actorUserId.Value,
+            cancellationToken);
+        return LaravelApiResponse.Success("customer", customer ?? throw NotFound("Retailer not found"), "Status updated successfully");
     }
 
     public async Task<LaravelApiResponse> SetCustomerActiveAsync(ulong id, string? active, ulong? actorUserId, CancellationToken cancellationToken)
@@ -203,6 +220,32 @@ public sealed class CustomerService : ICustomerService
         SetField(request.CustomFields, "shop_image", request.ShopImage);
     }
 
+    private static void ResolveAssignedUsers(CustomerRequestDto request, ulong? actorUserId, bool defaultToActor)
+    {
+        if (request.CustomFields is null) return;
+
+        var fieldPresent = AssignmentFieldKeys.Any(key => request.CustomFields.ContainsKey(key));
+        var ids = AssignmentFieldKeys
+            .SelectMany(key => ReadULongs(ReadField(request.CustomFields, key)))
+            .Distinct()
+            .ToList();
+
+        if (ids.Count == 0 && defaultToActor && actorUserId.HasValue) ids.Add(actorUserId.Value);
+        if (ids.Count == 0 && !fieldPresent) return;
+
+        request.AssignedUserIds = ids;
+
+        if (ids.Count == 0) return;
+        if (request.CustomerType == 1)
+        {
+            SetField(request.CustomFields, "sales_executive_id", string.Join(',', ids));
+        }
+        else
+        {
+            SetField(request.CustomFields, "employee_id", string.Join(',', ids));
+        }
+    }
+
     private static Dictionary<string, string?> ReadCustomFields(ExcelRow row)
     {
         var fields = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
@@ -268,6 +311,13 @@ public sealed class CustomerService : ICustomerService
         return key;
     }
 
+    private static string NormalizeApprovalStatus(string? status)
+    {
+        var normalized = NormalizeText(status)?.ToUpperInvariant();
+        if (normalized is "APPROVED" or "REJECTED" or "PENDING") return normalized;
+        throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, "Status must be APPROVED, REJECTED, or PENDING.");
+    }
+
     private static string? FirstNonBlank(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value))?.Trim();
 
@@ -281,6 +331,15 @@ public sealed class CustomerService : ICustomerService
 
     private static ulong? ReadULong(IReadOnlyDictionary<string, string?>? fields, string key) =>
         ulong.TryParse(ReadField(fields, key), out var parsed) ? parsed : null;
+
+    private static IEnumerable<ulong> ReadULongs(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) yield break;
+        foreach (var part in value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (ulong.TryParse(part, out var parsed) && parsed > 0) yield return parsed;
+        }
+    }
 
     private static MasterDataFileDto CreateWorkbook(string fileName, string[] headings, IEnumerable<object?[]> rows)
     {

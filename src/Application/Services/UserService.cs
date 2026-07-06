@@ -110,6 +110,8 @@ public sealed class UserService : IUserService
         {
             UserId = user.Id,
             DateOfJoining = request.DateOfJoining,
+            CurrentAddress = request.CurrentAddress,
+            PermanentAddress = request.PermanentAddress,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         }, cancellationToken);
@@ -171,6 +173,8 @@ public sealed class UserService : IUserService
             await _repository.AddUserDetailsAsync(details, cancellationToken);
         }
         details.DateOfJoining = request.DateOfJoining;
+        details.CurrentAddress = request.CurrentAddress ?? details.CurrentAddress;
+        details.PermanentAddress = request.PermanentAddress ?? details.PermanentAddress;
         details.UpdatedAt = DateTime.UtcNow;
 
         await _repository.SaveChangesAsync(cancellationToken);
@@ -606,6 +610,8 @@ public sealed class UserService : IUserService
         request.ReportingId ??= request.ULongAlias("reportingId", "reportingid");
         request.Location ??= request.StringAlias("location");
         request.BaseLocationCoordinates ??= request.StringAlias("baseLocationCoordinates");
+        request.CurrentAddress ??= request.StringAlias("currentAddress", "current_address", "address");
+        request.PermanentAddress ??= request.StringAlias("permanentAddress", "permanent_address");
         request.Payroll ??= request.StringAlias("payroll");
         request.WarehouseId ??= request.ULongAlias("warehouseId");
         request.SalesType ??= request.StringAlias("salesType");

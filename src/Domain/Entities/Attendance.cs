@@ -25,6 +25,7 @@ public sealed class Attendance : BaseEntity
     public string? ApproveRejectBy { get; set; }
     public string? PunchinFrom { get; set; }
     public string? Flag { get; set; }
+    public string? BeatId { get; set; }
     public string? TourId { get; set; }
     public string? City { get; set; }
 }

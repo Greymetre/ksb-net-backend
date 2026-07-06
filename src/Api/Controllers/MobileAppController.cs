@@ -123,10 +123,7 @@ public sealed class MobileAppController : ControllerBase
         fields["shop_name"] = shopName ?? ownerName;
         fields["mobile_numbers"] = mobile;
         fields["customer_type"] = customerType.ToString();
-        SetIfPresent(fields, "state_id", request.StateId?.ToString());
-        SetIfPresent(fields, "city_id", request.CityId?.ToString());
-        SetIfPresent(fields, "pincode", request.Pincode);
-        SetIfPresent(fields, "address", request.Address);
+        await ApplyMobileCustomerAddressFields(fields, request, cancellationToken);
         SetIfPresent(fields, "distributor_name", request.DealerId?.ToString());
 
         var now = DateTime.UtcNow;
@@ -147,6 +144,7 @@ public sealed class MobileAppController : ControllerBase
 
         await _dbContext.Customers.AddAsync(customer, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await SyncMobileCustomerAddressAsync(customer.Id, fields, cancellationToken);
 
         var token = _tokenService.CreateAccessToken("customers", customer.Id, DisplayName(customer), [], out var tokenId);
         await StoreCustomerTokenAndLogin(customer.Id, tokenId, request, cancellationToken);
@@ -208,9 +206,11 @@ public sealed class MobileAppController : ControllerBase
             ResetKycStatus(fields, documentKey);
         }
 
+        await CanonicalizeMobileCustomerAddressFields(fields, cancellationToken);
         customer.CustomFields = JsonSerializer.Serialize(fields, JsonOptions);
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await SyncMobileCustomerAddressAsync(customer.Id, fields, cancellationToken);
         return Ok(new
         {
             status = "success",
@@ -506,16 +506,14 @@ public sealed class MobileAppController : ControllerBase
         var shopName = FirstNonEmpty(request.ShopName, request.FirmName, GetString(request.Extra, "shop_name"));
         SetIfPresent(fields, "owner_name", ownerName);
         SetIfPresent(fields, "shop_name", shopName);
-        SetIfPresent(fields, "address", request.Address);
-        SetIfPresent(fields, "state_id", request.StateId?.ToString());
-        SetIfPresent(fields, "city_id", request.CityId?.ToString());
-        SetIfPresent(fields, "pincode", request.Pincode);
+        await ApplyMobileCustomerAddressFields(fields, request, cancellationToken);
         customer.FirstName = ownerName ?? customer.FirstName;
         customer.Name = shopName ?? customer.Name;
         customer.Email = request.Email?.Trim().ToLowerInvariant() ?? customer.Email;
         customer.CustomFields = JsonSerializer.Serialize(fields, JsonOptions);
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
+        await SyncMobileCustomerAddressAsync(customer.Id, fields, cancellationToken);
         return Ok(await ToMobileProfile(customer, cancellationToken));
     }
 
@@ -1092,6 +1090,76 @@ public sealed class MobileAppController : ControllerBase
             .FirstOrDefaultAsync(cancellationToken);
     }
 
+    private async Task ApplyMobileCustomerAddressFields(Dictionary<string, string?> fields, RegisterRequest request, CancellationToken cancellationToken)
+    {
+        SetIfPresent(fields, "address_line", FirstNonEmpty(request.Address, GetString(request.Extra, "address_line"), GetString(request.Extra, "address1"), GetString(request.Extra, "address")));
+        SetIfPresent(fields, "address1", Field(fields, "address_line"));
+        SetIfPresent(fields, "address", Field(fields, "address_line"));
+        SetIfPresent(fields, "country_id", GetString(request.Extra, "country_id"));
+        SetIfPresent(fields, "state_id", request.StateId?.ToString() ?? GetString(request.Extra, "state_id"));
+        SetIfPresent(fields, "district_id", GetString(request.Extra, "district_id"));
+        SetIfPresent(fields, "city_id", request.CityId?.ToString() ?? GetString(request.Extra, "city_id"));
+        SetIfPresent(fields, "pincode_id", GetString(request.Extra, "pincode_id"));
+        SetIfPresent(fields, "pincode", request.Pincode ?? GetString(request.Extra, "pincode"));
+        await CanonicalizeMobileCustomerAddressFields(fields, cancellationToken);
+    }
+
+    private async Task CanonicalizeMobileCustomerAddressFields(Dictionary<string, string?> fields, CancellationToken cancellationToken)
+    {
+        SetIfPresent(fields, "address_line", FirstField(fields, "address_line", "address1", "address"));
+        SetIfPresent(fields, "address1", Field(fields, "address_line"));
+        SetIfPresent(fields, "address", Field(fields, "address_line"));
+        if (string.IsNullOrWhiteSpace(Field(fields, "pincode_id")))
+        {
+            var pincodeId = await ResolvePincodeId(Field(fields, "pincode"), Field(fields, "city_id"), cancellationToken);
+            SetIfPresent(fields, "pincode_id", pincodeId?.ToString(CultureInfo.InvariantCulture));
+        }
+        if (string.IsNullOrWhiteSpace(Field(fields, "pincode")) && Field(fields, "pincode_id") is { } pincodeIdText)
+        {
+            SetIfPresent(fields, "pincode", await Pincode(pincodeIdText, cancellationToken));
+        }
+    }
+
+    private async Task<ulong?> ResolvePincodeId(string? pincode, string? cityId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(pincode)) return null;
+        if (ulong.TryParse(pincode, NumberStyles.Integer, CultureInfo.InvariantCulture, out var numeric))
+        {
+            var byValue = _dbContext.Pincodes.AsNoTracking().Where(x => x.PinCode == pincode);
+            if (ulong.TryParse(cityId, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedCityId))
+            {
+                byValue = byValue.Where(x => x.CityId == parsedCityId);
+            }
+            var matched = await byValue.Select(x => (ulong?)x.Id).FirstOrDefaultAsync(cancellationToken);
+            if (matched.HasValue) return matched;
+
+            if (await _dbContext.Pincodes.AsNoTracking().AnyAsync(x => x.Id == numeric, cancellationToken)) return numeric;
+        }
+        return null;
+    }
+
+    private async Task SyncMobileCustomerAddressAsync(ulong customerId, IReadOnlyDictionary<string, string?> fields, CancellationToken cancellationToken)
+    {
+        var address1 = FirstField(fields, "address_line", "address1", "address") ?? string.Empty;
+        var countryId = ParseULong(Field(fields, "country_id"));
+        var stateId = ParseULong(Field(fields, "state_id"));
+        var districtId = ParseULong(Field(fields, "district_id"));
+        var cityId = ParseULong(Field(fields, "city_id"));
+        var pincodeId = ParseULong(Field(fields, "pincode_id"));
+        if (string.IsNullOrWhiteSpace(address1) && !countryId.HasValue && !stateId.HasValue && !districtId.HasValue && !cityId.HasValue && !pincodeId.HasValue) return;
+
+        var existingId = await _dbContext.Database.SqlQueryRaw<ulong>("SELECT COALESCE(MAX(id), 0) AS Value FROM addresses WHERE customer_id = {0} AND deleted_at IS NULL", customerId).FirstAsync(cancellationToken);
+        if (existingId > 0)
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(@"UPDATE addresses SET address1 = {0}, country_id = {1}, state_id = {2}, district_id = {3}, city_id = {4}, pincode_id = {5}, updated_at = UTC_TIMESTAMP()
+WHERE id = {6}", [address1, countryId, stateId, districtId, cityId, pincodeId, existingId], cancellationToken);
+            return;
+        }
+
+        await _dbContext.Database.ExecuteSqlRawAsync(@"INSERT INTO addresses (active, customer_id, address1, country_id, state_id, district_id, city_id, pincode_id, created_at, updated_at)
+VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP())", [customerId, address1, countryId, stateId, districtId, cityId, pincodeId], cancellationToken);
+    }
+
     private object BuildMobileKyc(Customer customer, IReadOnlyDictionary<string, string?> fields)
     {
         var documents = new[]
@@ -1263,6 +1331,8 @@ public sealed class MobileAppController : ControllerBase
 
         return null;
     }
+
+    private static ulong? ParseULong(string? value) => ulong.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : null;
 
     private static string KycStatus(string? value)
     {

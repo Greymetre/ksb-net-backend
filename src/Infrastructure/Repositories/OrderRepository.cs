@@ -55,13 +55,15 @@ public sealed class OrderRepository : IOrderRepository
                 executive.Name,
                 executive.BranchId,
                 order.TotalQty,
+                order.ShippedQty,
                 order.SubTotal,
                 order.GrandTotal,
                 order.StatusId,
                 order.CreatedBy,
                 creator.Name,
                 order.CreatedAt,
-                order.OrderType))
+                order.OrderType,
+                order.OrderRemark))
             .ToListAsync(cancellationToken);
 
         if (!string.IsNullOrWhiteSpace(filter.Search))
@@ -95,6 +97,7 @@ public sealed class OrderRepository : IOrderRepository
             ExecutiveName = row.ExecutiveName,
             BranchName = FirstBranchId(row.BranchId) is { } branchId && branches.TryGetValue(branchId, out var branchName) ? branchName : null,
             TotalQty = row.TotalQty,
+            ShippedQty = row.ShippedQty,
             SubTotal = row.SubTotal,
             GrandTotal = row.GrandTotal,
             StatusId = row.StatusId,
@@ -102,7 +105,8 @@ public sealed class OrderRepository : IOrderRepository
             CreatedBy = row.CreatedBy,
             CreatedByName = row.CreatedByName,
             CreatedAt = row.CreatedAt,
-            OrderType = row.OrderType
+            OrderType = row.OrderType,
+            OrderRemark = row.OrderRemark
         }).ToArray();
     }
 
@@ -212,12 +216,28 @@ public sealed class OrderRepository : IOrderRepository
                 SubcategoryId = detail.SubcategoryId,
                 SubcategoryName = family.SubcategoryName,
                 Quantity = detail.Quantity,
+                ShippedQty = detail.ShippedQty,
                 Price = detail.Price,
                 Gst = detail.Gst,
                 TaxAmount = detail.TaxAmount,
-                LineTotal = detail.LineTotal
+                LineTotal = detail.LineTotal,
+                StatusId = detail.StatusId,
+                StatusName = StatusName(detail.StatusId)
             })
             .ToListAsync(cancellationToken);
+
+    public async Task<bool> DeleteOrderAsync(ulong id, CancellationToken cancellationToken)
+    {
+        await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM order_details WHERE order_id = {id}",
+            cancellationToken);
+
+        var deletedOrders = await _dbContext.Database.ExecuteSqlInterpolatedAsync(
+            $"DELETE FROM orders WHERE id = {id}",
+            cancellationToken);
+
+        return deletedOrders > 0;
+    }
 
     public async Task<OrderOptionsDto> GetOptionsAsync(ulong? actorUserId, CancellationToken cancellationToken)
     {
@@ -277,11 +297,20 @@ public sealed class OrderRepository : IOrderRepository
     public Task<Order?> GetOrderEntityAsync(ulong id, CancellationToken cancellationToken) =>
         _dbContext.Orders.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
 
+    public async Task<IReadOnlyCollection<OrderDetail>> GetOrderDetailEntitiesAsync(ulong orderId, CancellationToken cancellationToken) =>
+        await _dbContext.OrderDetails.Where(x => x.OrderId == orderId).OrderBy(x => x.Id).ToListAsync(cancellationToken);
+
     public async Task AddOrderAsync(Order order, CancellationToken cancellationToken) =>
         await _dbContext.Orders.AddAsync(order, cancellationToken);
 
     public async Task AddOrderDetailsAsync(IReadOnlyCollection<OrderDetail> details, CancellationToken cancellationToken) =>
         await _dbContext.OrderDetails.AddRangeAsync(details, cancellationToken);
+
+    public void RemoveOrder(Order order) =>
+        _dbContext.Orders.Remove(order);
+
+    public void RemoveOrderDetails(IReadOnlyCollection<OrderDetail> details) =>
+        _dbContext.OrderDetails.RemoveRange(details);
 
     public Task SaveChangesAsync(CancellationToken cancellationToken) =>
         _dbContext.SaveChangesAsync(cancellationToken);
@@ -383,6 +412,7 @@ public sealed class OrderRepository : IOrderRepository
         {
             1 => "Dispatch",
             2 => "Partial Dispatch",
+            4 => "Canceled",
             _ => "Pending"
         };
 
@@ -402,13 +432,15 @@ public sealed class OrderRepository : IOrderRepository
         string? ExecutiveName,
         string? BranchId,
         decimal TotalQty,
+        decimal ShippedQty,
         decimal SubTotal,
         decimal GrandTotal,
         ulong? StatusId,
         ulong? CreatedBy,
         string? CreatedByName,
         DateTime? CreatedAt,
-        string? OrderType);
+        string? OrderType,
+        string? OrderRemark);
 
     private sealed record OrderExportProjection(
         DateTime? OrderDate,

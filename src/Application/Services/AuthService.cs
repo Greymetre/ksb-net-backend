@@ -51,6 +51,38 @@ public sealed class AuthService : IAuthService
         throw new LaravelHttpException(LaravelStatusCodes.NotFound, "Invalid credentials or account not found");
     }
 
+    public async Task<LaravelApiResponse> FieldKonnectLoginAsync(LoginRequestDto request, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, new Dictionary<string, string[]>
+            {
+                ["username"] = string.IsNullOrWhiteSpace(request.Username) ? ["The username field is required."] : [],
+                ["password"] = string.IsNullOrWhiteSpace(request.Password) ? ["The password field is required."] : []
+            });
+        }
+
+        var user = await _repository.FindUserByUsernameAsync(request.Username.Trim(), cancellationToken);
+        if (user is null)
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.NotFound, "User not found");
+        }
+
+        return await HandleUserLoginAsync(user, request, cancellationToken);
+    }
+
+    public async Task<LaravelApiResponse> GetUserProfileAsync(ulong userId, CancellationToken cancellationToken)
+    {
+        var user = await _repository.FindUserByIdAsync(userId, cancellationToken);
+        if (user is null)
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.NotFound, "User not found");
+        }
+
+        var roles = await _repository.GetUserRolesAsync(user.Id, cancellationToken);
+        return LaravelApiResponse.Success("userinfo", BuildUserInfo(user, roles, [], accessToken: null));
+    }
+
     public async Task<LaravelApiResponse> SignupAsync(SignupRequestDto request, CancellationToken cancellationToken)
     {
         var firstError = await ValidateSignupAsync(request, cancellationToken);
@@ -234,13 +266,14 @@ public sealed class AuthService : IAuthService
 
         customer = await _repository.AddCustomerAsync(customer, cancellationToken);
 
+        var isMobileSignup = IsMobileLoginRequest(request);
         var token = _tokenService.CreateAccessToken("customers", customer.Id, customer.Name, [], out var tokenId);
         await _repository.StoreTokenAsync(new OAuthAccessToken
         {
             Id = tokenId,
             UserId = customer.Id,
             ClientId = 0,
-            Name = "mobile-app-token",
+            Name = isMobileSignup ? "mobile-app-token" : "web-token",
             Scopes = "[]",
             Revoked = false,
             CreatedAt = DateTime.UtcNow,
@@ -248,18 +281,21 @@ public sealed class AuthService : IAuthService
             ExpiresAt = DateTime.UtcNow.AddDays(30)
         }, cancellationToken);
 
-        await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+        if (isMobileSignup)
         {
-            CustomerId = customer.Id,
-            AppVersion = request.AppVersion ?? "unknown",
-            DeviceType = request.DeviceType ?? "unknown",
-            DeviceName = request.DeviceName ?? "unknown",
-            UniqueId = request.UniqueId,
-            FirstLoginDate = DateTime.UtcNow,
-            LastLoginDate = DateTime.UtcNow,
-            LoginStatus = "1",
-            App = "1"
-        }, cancellationToken);
+            await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+            {
+                CustomerId = customer.Id,
+                AppVersion = request.AppVersion ?? "unknown",
+                DeviceType = request.DeviceType ?? "unknown",
+                DeviceName = request.DeviceName ?? "unknown",
+                UniqueId = request.UniqueId,
+                FirstLoginDate = DateTime.UtcNow,
+                LastLoginDate = DateTime.UtcNow,
+                LoginStatus = "1",
+                App = "1"
+            }, cancellationToken);
+        }
         await _repository.SaveChangesAsync(cancellationToken);
 
         return LaravelApiResponse.Success("userinfo", new
@@ -282,13 +318,19 @@ public sealed class AuthService : IAuthService
 
     public async Task<LaravelApiResponse> LogoutAsync(string tokenId, string provider, ulong subjectId, CancellationToken cancellationToken)
     {
+        var token = await _repository.FindTokenByIdAsync(tokenId, cancellationToken);
         await _repository.RevokeTokenAsync(tokenId, cancellationToken);
-        await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+
+        if (IsMobileToken(token))
         {
-            UserId = provider == "users" ? subjectId : null,
-            CustomerId = provider == "customers" ? subjectId : null,
-            LoginStatus = "0"
-        }, cancellationToken);
+            await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+            {
+                UserId = provider == "users" ? subjectId : null,
+                CustomerId = provider == "customers" ? subjectId : null,
+                LoginStatus = "0"
+            }, cancellationToken);
+        }
+
         await _repository.SaveChangesAsync(cancellationToken);
         return LaravelApiResponse.MessageOnly("success", "Logout Successfully");
     }
@@ -309,13 +351,16 @@ public sealed class AuthService : IAuthService
         var permissions = await _repository.GetUserPermissionsAsync(user.Id, cancellationToken);
         var roleNames = roles.Select(role => role.Name).ToArray();
         var isSuperAdmin = roleNames.Any(role => string.Equals(role, "superadmin", StringComparison.OrdinalIgnoreCase));
-        var loginDetail = await _repository.GetUserLoginDetailAsync(user.Id, cancellationToken);
+        var isMobileLogin = IsMobileLoginRequest(request);
+        var loginDetail = isMobileLogin
+            ? await _repository.GetUserLoginDetailAsync(user.Id, cancellationToken)
+            : null;
 
-        // if (loginDetail is not null && !isSuperAdmin && !string.IsNullOrWhiteSpace(loginDetail.UniqueId)
-        //     && loginDetail.UniqueId != request.UniqueId && loginDetail.MultiLogin == "0")
-        // {
-        //     throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, "Multiple device login not allowed. Contact support: 9713113280.");
-        // }
+        if (isMobileLogin && loginDetail is not null && IsMobileLoginDetail(loginDetail) && !isSuperAdmin && !string.IsNullOrWhiteSpace(loginDetail.UniqueId)
+            && loginDetail.UniqueId != request.UniqueId && loginDetail.MultiLogin == "0")
+        {
+            throw new LaravelHttpException(LaravelStatusCodes.NoContentLikeValidation, "Multiple device login is not allowed. For support, please contact FieldKonnect at 9713113280.");
+        }
 
         var token = _tokenService.CreateAccessToken("users", user.Id, user.Name, roleNames, out var tokenId);
         await _repository.StoreTokenAsync(new OAuthAccessToken
@@ -323,7 +368,7 @@ public sealed class AuthService : IAuthService
             Id = tokenId,
             UserId = user.Id,
             ClientId = 0,
-            Name = "mobile-app-token",
+            Name = isMobileLogin ? "mobile-app-token" : "web-token",
             Scopes = "[]",
             Revoked = false,
             CreatedAt = DateTime.UtcNow,
@@ -331,37 +376,31 @@ public sealed class AuthService : IAuthService
             ExpiresAt = DateTime.UtcNow.AddDays(30)
         }, cancellationToken);
 
-        await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+        if (isMobileLogin)
         {
-            UserId = user.Id,
-            AppVersion = request.AppVersion,
-            DeviceName = request.DeviceName,
-            DeviceType = request.DeviceType,
-            UniqueId = request.UniqueId,
-            LastLoginDate = DateTime.UtcNow,
-            LoginStatus = "1",
-            App = "2",
-            LoginAt = request.LoginAt.HasValue ? DateTime.UtcNow : null
-        }, cancellationToken);
+            await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+            {
+                UserId = user.Id,
+                AppVersion = request.AppVersion,
+                DeviceName = request.DeviceName,
+                DeviceType = request.DeviceType,
+                UniqueId = request.UniqueId,
+                LastLoginDate = DateTime.UtcNow,
+                LoginStatus = "1",
+                App = "2",
+                LoginAt = DateTime.UtcNow
+            }, cancellationToken);
+        }
 
         user.NotificationId = request.FcmToken ?? user.NotificationId;
-        user.DeviceType = request.DeviceType ?? user.DeviceType;
+        if (isMobileLogin)
+        {
+            user.DeviceType = request.DeviceType ?? user.DeviceType;
+        }
+
         await _repository.SaveChangesAsync(cancellationToken);
 
-        return LaravelApiResponse.Success("userinfo", new LoginUserInfoDto
-        {
-            Id = user.Id,
-            Name = user.Name,
-            Email = user.Email,
-            Mobile = user.Mobile,
-            ProfileImage = user.ProfileImage,
-            AccessToken = token,
-            Roles = roles.Select(role => role.Id).ToArray(),
-            Permissions = permissions.Select(permission => permission.Name).ToArray(),
-            UserType = roleNames,
-            LeaveBalance = user.LeaveBalance,
-            Provider = roleNames.Contains("Customer Dealer") ? "retailers" : "users"
-        });
+        return LaravelApiResponse.Success("userinfo", BuildUserInfo(user, roles, permissions, token));
     }
 
     private async Task<LaravelApiResponse> HandleCustomerLoginAsync(Customer customer, LoginRequestDto request, CancellationToken cancellationToken)
@@ -377,12 +416,13 @@ public sealed class AuthService : IAuthService
         }
 
         var token = _tokenService.CreateAccessToken("customers", customer.Id, customer.Name, [], out var tokenId);
+        var isMobileLogin = IsMobileLoginRequest(request);
         await _repository.StoreTokenAsync(new OAuthAccessToken
         {
             Id = tokenId,
             UserId = customer.Id,
             ClientId = 0,
-            Name = "mobile-app-token",
+            Name = isMobileLogin ? "mobile-app-token" : "web-token",
             Scopes = "[]",
             Revoked = false,
             CreatedAt = DateTime.UtcNow,
@@ -390,17 +430,20 @@ public sealed class AuthService : IAuthService
             ExpiresAt = DateTime.UtcNow.AddDays(30)
         }, cancellationToken);
 
-        await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+        if (isMobileLogin)
         {
-            CustomerId = customer.Id,
-            AppVersion = request.AppVersion,
-            DeviceName = request.DeviceName,
-            DeviceType = request.DeviceType,
-            UniqueId = request.UniqueId,
-            LastLoginDate = DateTime.UtcNow,
-            LoginStatus = "1",
-            App = "1"
-        }, cancellationToken);
+            await _repository.UpsertLoginDetailAsync(new MobileUserLoginDetail
+            {
+                CustomerId = customer.Id,
+                AppVersion = request.AppVersion,
+                DeviceName = request.DeviceName,
+                DeviceType = request.DeviceType,
+                UniqueId = request.UniqueId,
+                LastLoginDate = DateTime.UtcNow,
+                LoginStatus = "1",
+                App = "1"
+            }, cancellationToken);
+        }
         await _repository.SaveChangesAsync(cancellationToken);
 
         return LaravelApiResponse.Success("userinfo", new
@@ -414,6 +457,78 @@ public sealed class AuthService : IAuthService
             access_token = token,
             provider = "customers"
         });
+    }
+
+    private static bool IsMobileLoginRequest(LoginRequestDto request)
+    {
+        return IsMobileDeviceType(request.DeviceType);
+    }
+
+    private static bool IsMobileLoginRequest(CustomerSignupRequestDto request)
+    {
+        return IsMobileDeviceType(request.DeviceType);
+    }
+
+    private static bool IsMobileDeviceType(string? value)
+    {
+        var deviceType = value?.Trim();
+        if (string.IsNullOrWhiteSpace(deviceType))
+        {
+            return false;
+        }
+
+        return deviceType.Equals("android", StringComparison.OrdinalIgnoreCase)
+            || deviceType.Equals("ios", StringComparison.OrdinalIgnoreCase)
+            || deviceType.Equals("iphone", StringComparison.OrdinalIgnoreCase)
+            || deviceType.Equals("ipad", StringComparison.OrdinalIgnoreCase)
+            || deviceType.Equals("mobile", StringComparison.OrdinalIgnoreCase)
+            || deviceType.Equals("app", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsMobileLoginDetail(MobileUserLoginDetail detail)
+    {
+        var deviceType = detail.DeviceType?.Trim();
+        if (string.IsNullOrWhiteSpace(deviceType))
+        {
+            return !string.IsNullOrWhiteSpace(detail.UniqueId) && !string.Equals(detail.App, "web", StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !deviceType.Equals("web", StringComparison.OrdinalIgnoreCase)
+            && !deviceType.Equals("browser", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsMobileToken(OAuthAccessToken? token)
+    {
+        return token is not null
+            && !string.IsNullOrWhiteSpace(token.Name)
+            && token.Name.Contains("mobile", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static LoginUserInfoDto BuildUserInfo(User user, IReadOnlyCollection<Role> roles, IReadOnlyCollection<Permission> permissions, string? accessToken)
+    {
+        var roleNames = roles.Select(role => role.Name).ToArray();
+        return new LoginUserInfoDto
+        {
+            Id = user.Id,
+            Name = user.Name,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Email = user.Email,
+            Mobile = user.Mobile,
+            ProfileImage = user.ProfileImage,
+            Gender = user.Gender,
+            RegionId = user.RegionId,
+            DivisionId = user.DivisionId,
+            DividionId = user.DivisionId,
+            PayrollId = user.Payroll,
+            EmployeeCodes = user.EmployeeCodes,
+            AccessToken = accessToken ?? string.Empty,
+            Roles = roles.Select(role => role.Id).ToArray(),
+            Permissions = permissions.Select(permission => permission.Name).ToArray(),
+            UserType = roleNames,
+            LeaveBalance = user.LeaveBalance,
+            Provider = roleNames.Contains("Customer Dealer") ? "retailers" : "users"
+        };
     }
 
     private async Task<string?> ValidateSignupAsync(SignupRequestDto request, CancellationToken cancellationToken)

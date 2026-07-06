@@ -31,6 +31,7 @@ public sealed class OrderDto
     public string? ExecutiveName { get; set; }
     public string? BranchName { get; set; }
     public decimal TotalQty { get; set; }
+    public decimal ShippedQty { get; set; }
     public decimal SubTotal { get; set; }
     public decimal GrandTotal { get; set; }
     public ulong? StatusId { get; set; }
@@ -39,6 +40,7 @@ public sealed class OrderDto
     public string? CreatedByName { get; set; }
     public DateTime? CreatedAt { get; set; }
     public string? OrderType { get; set; }
+    public string? OrderRemark { get; set; }
 }
 
 public sealed class OrderDetailDto
@@ -49,10 +51,13 @@ public sealed class OrderDetailDto
     public ulong? SubcategoryId { get; set; }
     public string? SubcategoryName { get; set; }
     public decimal Quantity { get; set; }
+    public decimal ShippedQty { get; set; }
     public decimal Price { get; set; }
     public decimal Gst { get; set; }
     public decimal TaxAmount { get; set; }
     public decimal LineTotal { get; set; }
+    public ulong? StatusId { get; set; }
+    public string StatusName { get; set; } = "Pending";
 }
 
 public sealed class OrderRequestDto
@@ -81,6 +86,17 @@ public sealed class OrderDetailRequestDto
     public decimal? Gst { get; set; }
     public decimal? TaxAmount { get; set; }
     public decimal? LineTotal { get; set; }
+}
+
+public sealed class OrderStatusRequestDto
+{
+    public ulong? StatusId { get; set; }
+    public string? Remark { get; set; }
+}
+
+public sealed class OrderActiveRequestDto
+{
+    public string? Active { get; set; }
 }
 
 public sealed class OrderOptionsDto

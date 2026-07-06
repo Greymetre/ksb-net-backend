@@ -5,6 +5,7 @@ namespace Application.Interfaces.Repositories;
 public interface IAuthRepository
 {
     Task<User?> FindUserByUsernameAsync(string username, CancellationToken cancellationToken);
+    Task<User?> FindUserByIdAsync(ulong userId, CancellationToken cancellationToken);
     Task<Customer?> FindCustomerByUsernameAsync(string username, CancellationToken cancellationToken);
     Task<bool> UserMobileExistsAsync(string mobile, CancellationToken cancellationToken);
     Task<bool> UserEmailExistsAsync(string email, CancellationToken cancellationToken);
@@ -19,6 +20,7 @@ public interface IAuthRepository
     Task<MobileUserLoginDetail?> GetUserLoginDetailAsync(ulong userId, CancellationToken cancellationToken);
     Task UpsertLoginDetailAsync(MobileUserLoginDetail detail, CancellationToken cancellationToken);
     Task StoreTokenAsync(OAuthAccessToken token, CancellationToken cancellationToken);
+    Task<OAuthAccessToken?> FindTokenByIdAsync(string tokenId, CancellationToken cancellationToken);
     Task RevokeTokenAsync(string tokenId, CancellationToken cancellationToken);
     Task SaveChangesAsync(CancellationToken cancellationToken);
 }

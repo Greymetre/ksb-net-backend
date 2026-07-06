@@ -111,6 +111,15 @@ public sealed class CustomersController : ControllerBase
         return Ok(response);
     }
 
+    [RequirePermission("customer_edit")]
+    [HttpPost("{id}/approval-status")]
+    [HttpPut("{id}/approval-status")]
+    public async Task<IActionResult> SetRetailerApprovalStatus(ulong id, [FromBody] CustomerApprovalStatusRequestDto request, CancellationToken cancellationToken)
+    {
+        var response = await _customerService.SetRetailerApprovalStatusAsync(id, request.Status, request.Remark, CurrentUserId(), cancellationToken);
+        return Ok(response);
+    }
+
     [RequirePermission("customer_kyc_access", "customer_edit")]
     [HttpPost("{id}/kyc/{documentKey}/approve")]
     public async Task<IActionResult> ApproveKycDocument(ulong id, string documentKey, [FromBody] CustomerKycApprovalRequestDto request, CancellationToken cancellationToken)
@@ -222,12 +231,19 @@ public sealed class CustomersController : ControllerBase
 
         var extension = Path.GetExtension(file.FileName);
         var fileName = $"{Guid.NewGuid():N}{extension}";
-        var uploadRoot = Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "uploads", "customers", folder);
+        var webRoot = _environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot");
+        var storageFolder = Path.Combine("customers", folder);
+        var uploadRoot = Path.Combine(webRoot, "public", "storage", storageFolder);
         Directory.CreateDirectory(uploadRoot);
         var fullPath = Path.Combine(uploadRoot, fileName);
-        await using var stream = System.IO.File.Create(fullPath);
-        await file.CopyToAsync(stream, cancellationToken);
-        return $"/uploads/customers/{folder}/{fileName}";
+        await using (var stream = System.IO.File.Create(fullPath))
+        {
+            await file.CopyToAsync(stream, cancellationToken);
+        }
+        var storageRoot = Path.Combine(webRoot, "storage", storageFolder);
+        Directory.CreateDirectory(storageRoot);
+        System.IO.File.Copy(fullPath, Path.Combine(storageRoot, fileName), true);
+        return $"/public/storage/customers/{folder}/{fileName}";
     }
 
     private static bool IsKycDocumentFolder(string folder) =>

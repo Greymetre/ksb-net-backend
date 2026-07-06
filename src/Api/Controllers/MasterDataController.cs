@@ -1,8 +1,10 @@
 using Api.Filters;
 using Application.DTOs.MasterData;
 using Application.Interfaces.Services;
+using Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 
 namespace Api.Controllers;
@@ -12,10 +14,12 @@ namespace Api.Controllers;
 public sealed class MasterDataController : ControllerBase
 {
     private readonly IMasterDataService _masterDataService;
+    private readonly AppDbContext _dbContext;
 
-    public MasterDataController(IMasterDataService masterDataService)
+    public MasterDataController(IMasterDataService masterDataService, AppDbContext dbContext)
     {
         _masterDataService = masterDataService;
+        _dbContext = dbContext;
     }
 
     [HttpGet("getcountry")]
@@ -658,14 +662,22 @@ public sealed class MasterDataController : ControllerBase
     }
 
     [Authorize]
-    [RequirePermission("designation")]
     [HttpGet("getdesignations")]
     [HttpGet("designation")]
     [HttpGet("designations")]
     public async Task<IActionResult> GetDesignations([FromQuery] string? search, CancellationToken cancellationToken)
     {
-        var response = await _masterDataService.GetDesignationsAsync(search, cancellationToken);
-        return Ok(response);
+        var query = _dbContext.Designations.AsNoTracking().Where(x => x.DeletedAt == null && x.Active == "Y");
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(x => x.DesignationName.Contains(search.Trim()));
+        }
+
+        var data = await query
+            .OrderBy(x => x.DesignationName)
+            .Select(x => new { id = x.Id, designation_name = x.DesignationName })
+            .ToListAsync(cancellationToken);
+        return Ok(new { status = true, message = "Designations retrieved successfully", data });
     }
 
     [Authorize]

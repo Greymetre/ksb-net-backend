@@ -72,6 +72,30 @@ public sealed class OrdersController : ControllerBase
         StatusCode(StatusCodes.Status201Created, await _service.CreateOrderAsync(request, CurrentUserId(), cancellationToken));
 
     [Authorize]
+    [RequirePermission("order_access", "order_edit")]
+    [HttpPut("orders/{id}")]
+    public async Task<IActionResult> UpdateOrder(ulong id, [FromBody] OrderRequestDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.UpdateOrderAsync(id, request, CurrentUserId(), cancellationToken));
+
+    [Authorize]
+    [RequirePermission("order_access", "order_delete")]
+    [HttpDelete("orders/{id}")]
+    public async Task<IActionResult> DeleteOrder(ulong id, CancellationToken cancellationToken) =>
+        Ok(await _service.DeleteOrderAsync(id, cancellationToken));
+
+    [Authorize]
+    [RequirePermission("order_access", "order_active")]
+    [HttpPost("orders/{id}/active")]
+    public async Task<IActionResult> SetActive(ulong id, [FromBody] OrderActiveRequestDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.SetActiveAsync(id, request, cancellationToken));
+
+    [Authorize]
+    [RequirePermission("order_access", "order_edit")]
+    [HttpPost("orders/{id}/status")]
+    public async Task<IActionResult> SetStatus(ulong id, [FromBody] OrderStatusRequestDto request, CancellationToken cancellationToken) =>
+        Ok(await _service.SetStatusAsync(id, request, cancellationToken));
+
+    [Authorize]
     [RequirePermission("order_access", "order_download")]
     [HttpGet("orders/export")]
     public async Task<IActionResult> ExportOrders(

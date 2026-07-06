@@ -40,11 +40,28 @@ Implemented foundation:
 - Initial EF migration: `src/Infrastructure/Migrations/InitialLaravelAuthFoundation`.
 - First API endpoints:
   - `POST /api/login`
+  - `POST /api/fieldkonnect/login`
+  - `GET|POST /api/getProfile`
   - `POST /api/signup`
   - `POST /api/customerSignup`
   - `GET|POST /api/logout`
   - `GET|POST /api/customer/logout`
+  - `GET /api/get-field-connet-version`
+  - `GET /api/getAppVersion`
+  - `GET|POST /api/getOrderDiscountLimit`
+  - `GET|POST /api/dashboard`
+  - `GET|POST /api/getPunchin`
+  - `POST /api/userPunchin`
+  - `POST /api/userPunchout`
+  - `GET|POST /api/getLeaveBalance`
+  - `GET|POST /api/getUserSataus`
   - `GET /api/migration-status`
+
+FieldKonnect mobile route parity:
+
+- Concrete .NET controllers handle migrated endpoints first.
+- A low-priority compatibility controller catches remaining Laravel `routes/api.php` paths under `/api` and returns a Laravel-style `501` JSON response with `migration_status: pending` instead of a plain 404.
+- This makes endpoint gaps visible to the mobile app and QA while each Laravel controller method is migrated into a real .NET service.
 
 ## Run
 
@@ -408,9 +425,12 @@ Continue implementation in this order:
 2. Users module.
 3. Roles and permissions.
 4. Dashboard.
-5. Customers.
-6. HR modules: attendance, leave, expenses, appraisal, joining/resignation.
-7. Remaining modules endpoint-by-endpoint from `routes/api.php`, then admin web/AJAX routes if those must also move.
+5. Customers. FieldKonnect user APIs now include `storeCustomer`, `updateCustomerLocation`, `updateCustomerProfile`, `getRetailers`, `getDistributors`, `getCustomerList`, `getCustomerInfo`, and `customers-active`.
+6. Customer check-in/check-out. FieldKonnect user APIs now include `submitCheckin`, `submitCheckout`, `getCurrentOpenCheckin`, `getCheckin`, `addCheckinDraft`, `getCheckinDraft`, and `getCheckinByEntity`.
+7. Punch-in support data. FieldKonnect user APIs now include `userCityList` and `tour/show` for city and tour plan selection.
+8. Leave. FieldKonnect user APIs now include `addLeaves`, `getLeaves`, and `leaves/balance`.
+9. HR modules: expenses, appraisal, joining/resignation.
+10. Remaining modules endpoint-by-endpoint from `routes/api.php`, then admin web/AJAX routes if those must also move.
 
 ## Production Notes
 

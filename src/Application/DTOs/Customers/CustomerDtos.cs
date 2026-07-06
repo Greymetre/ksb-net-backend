@@ -59,6 +59,7 @@ public sealed class CustomerRequestDto
     public string? SapCode { get; set; }
     public string? ManagerName { get; set; }
     public string? ManagerPhone { get; set; }
+    public IReadOnlyCollection<ulong>? AssignedUserIds { get; set; }
     public Dictionary<string, string?>? CustomFields { get; set; }
 }
 
@@ -74,5 +75,11 @@ public sealed class CustomerListFilterDto
 
 public sealed class CustomerKycApprovalRequestDto
 {
+    public string? Remark { get; set; }
+}
+
+public sealed class CustomerApprovalStatusRequestDto
+{
+    public string? Status { get; set; }
     public string? Remark { get; set; }
 }

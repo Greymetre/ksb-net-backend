@@ -10,6 +10,12 @@ public sealed class LoginUserInfoDto
     [JsonPropertyName("name")]
     public string? Name { get; set; }
 
+    [JsonPropertyName("first_name")]
+    public string? FirstName { get; set; }
+
+    [JsonPropertyName("last_name")]
+    public string? LastName { get; set; }
+
     [JsonPropertyName("email")]
     public string? Email { get; set; }
 
@@ -19,7 +25,26 @@ public sealed class LoginUserInfoDto
     [JsonPropertyName("profile_image")]
     public string? ProfileImage { get; set; }
 
+    [JsonPropertyName("gender")]
+    public string? Gender { get; set; }
+
+    [JsonPropertyName("region_id")]
+    public ulong? RegionId { get; set; }
+
+    [JsonPropertyName("division_id")]
+    public ulong? DivisionId { get; set; }
+
+    [JsonPropertyName("dividion_id")]
+    public ulong? DividionId { get; set; }
+
+    [JsonPropertyName("payroll_id")]
+    public string? PayrollId { get; set; }
+
+    [JsonPropertyName("employee_codes")]
+    public string? EmployeeCodes { get; set; }
+
     [JsonPropertyName("access_token")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public string AccessToken { get; set; } = string.Empty;
 
     [JsonPropertyName("roles")]
@@ -36,4 +61,10 @@ public sealed class LoginUserInfoDto
 
     [JsonPropertyName("provider")]
     public string Provider { get; set; } = "users";
+
+    [JsonPropertyName("todayBeatSchedule")]
+    public bool TodayBeatSchedule { get; set; }
+
+    [JsonPropertyName("beatUser")]
+    public bool BeatUser { get; set; }
 }
