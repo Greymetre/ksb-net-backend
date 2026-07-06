@@ -540,7 +540,7 @@ ORDER BY u.name ASC", cancellationToken);
             parameters.Add(("@branch", "%" + Value(request, "branch") + "%"));
         }
 
-        var rows = await QueryRows($@"SELECT DISTINCT u.id
+        var rows = await QueryRows($@"SELECT DISTINCT u.id, u.name
 FROM users u
 LEFT JOIN divisions d ON d.id = u.division_id AND d.deleted_at IS NULL
 LEFT JOIN branches b ON FIND_IN_SET(b.id, u.branch_id) AND b.deleted_at IS NULL
