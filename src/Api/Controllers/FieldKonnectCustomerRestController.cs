@@ -1379,7 +1379,7 @@ LIMIT 1", cancellationToken,
         var storageRoot = Path.Combine(webRoot, "storage", storageFolder);
         Directory.CreateDirectory(storageRoot);
         System.IO.File.Copy(fullPath, Path.Combine(storageRoot, fileName), true);
-        return $"{storageFolder}/{fileName}";
+        return $"storage/{storageFolder}/{fileName}";
     }
 
     private static bool IsImageFile(IFormFile file)
@@ -1542,9 +1542,9 @@ LIMIT 1", cancellationToken,
         if (value is null) return string.Empty;
         if (Uri.TryCreate(value, UriKind.Absolute, out _)) return value;
         value = value.Replace("\\", "/", StringComparison.Ordinal).TrimStart('/');
-        if (value.StartsWith("public/storage/", StringComparison.OrdinalIgnoreCase)) return value["public/storage/".Length..];
-        if (value.StartsWith("storage/", StringComparison.OrdinalIgnoreCase)) return value["storage/".Length..];
-        return value;
+        if (value.StartsWith("public/storage/", StringComparison.OrdinalIgnoreCase)) return value["public/".Length..];
+        if (value.StartsWith("storage/", StringComparison.OrdinalIgnoreCase)) return value;
+        return $"storage/{value}";
     }
 
     private static DateTime? ParseDate(string? value) => DateTime.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.AssumeLocal, out var date) ? date.Date : null;
