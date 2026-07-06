@@ -388,9 +388,9 @@ ORDER BY city.city_name ASC", cancellationToken);
             : (ulong?)(await QueryScalarLong("SELECT COALESCE(MAX(id), 0) FROM customers WHERE mobile = @mobile AND deleted_at IS NOT NULL", cancellationToken, ("@mobile", mobile)) is var deletedId && deletedId > 0 ? (ulong)deletedId : null);
 
         var customerStorageFolder = isDistributor ? "distributors/shop_images" : "secondary_customers";
-        var profileImage = await SaveFormFile(FirstNonEmpty("profile_image"), "profile-images", cancellationToken, isDistributor ? "distributors/profile_images" : "secondary_customers");
-        var shopImage = await SaveFormFile(FirstNonEmpty("shop_image", "shop_photo"), "shop-photos", cancellationToken, customerStorageFolder);
-        var cancelledCheque = await SaveFormFile(FirstNonEmpty("cancelled_cheque", "bank_proof"), "bank-proofs", cancellationToken, isDistributor ? "distributors/cheques" : "secondary_customers");
+        var profileImage = await SaveFormFile("profile_image", "profile-images", cancellationToken, isDistributor ? "distributors/profile_images" : "secondary_customers");
+        var shopImage = await SaveFirstFormFile(["shop_photo", "shop_image"], "shop-photos", cancellationToken, customerStorageFolder);
+        var cancelledCheque = await SaveFirstFormFile(["bank_proof", "cancelled_cheque"], "bank-proofs", cancellationToken, isDistributor ? "distributors/cheques" : "secondary_customers");
         var gstAttachment = await SaveFormFile("gst_attachment", "gst-attachments", cancellationToken, "secondary_customers");
         var panAttachment = await SaveFormFile("pan_attachment", "pan-attachments", cancellationToken, "secondary_customers");
         var mouFile = await SaveFormFile("mou_file", "documents", cancellationToken, isDistributor ? "distributors/mou" : "secondary_customers");
@@ -1340,6 +1340,18 @@ LIMIT 1", cancellationToken,
         var file = Request.Form.Files[fieldName];
         if (file is null || file.Length == 0) return null;
         return await SaveFile(file, folder, cancellationToken, storageFolder);
+    }
+
+    private async Task<string?> SaveFirstFormFile(IReadOnlyList<string> fieldNames, string folder, CancellationToken cancellationToken, string? storageFolder = null)
+    {
+        if (!Request.HasFormContentType) return null;
+        foreach (var fieldName in fieldNames)
+        {
+            var saved = await SaveFormFile(fieldName, folder, cancellationToken, storageFolder);
+            if (!string.IsNullOrWhiteSpace(saved)) return saved;
+        }
+
+        return null;
     }
 
     private async Task<List<string>> SaveFormFiles(string fieldName, string folder, CancellationToken cancellationToken, string? storageFolder = null)
