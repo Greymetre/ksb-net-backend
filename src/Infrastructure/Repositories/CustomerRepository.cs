@@ -89,6 +89,7 @@ public sealed class CustomerRepository : ICustomerRepository
     public async Task<CustomerDto> CreateCustomerAsync(CustomerRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         var now = DateTime.UtcNow;
+        var assignedUserIds = AssignedUserIdsOrCreator(request.AssignedUserIds, actorUserId);
         var customer = new Customer
         {
             Active = NormalizeActive(request.Active) ?? "Y",
@@ -107,7 +108,7 @@ public sealed class CustomerRepository : ICustomerRepository
             SapCode = NormalizeText(request.SapCode),
             ManagerName = NormalizeText(request.ManagerName) ?? string.Empty,
             ManagerPhone = NormalizeText(request.ManagerPhone) ?? string.Empty,
-            ExecutiveId = FirstAssignedUserId(request.AssignedUserIds),
+            ExecutiveId = FirstAssignedUserId(assignedUserIds),
             CustomFields = SerializeFields(request.CustomFields),
             CreatedBy = actorUserId,
             CreatedAt = now,
@@ -117,7 +118,7 @@ public sealed class CustomerRepository : ICustomerRepository
         await _dbContext.Customers.AddAsync(customer, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         await SyncCustomerRelatedTablesAsync(customer.Id, request.CustomFields, actorUserId, cancellationToken);
-        await SyncCustomerAssignmentsAsync(customer.Id, request.AssignedUserIds, actorUserId, cancellationToken);
+        await SyncCustomerAssignmentsAsync(customer.Id, assignedUserIds, actorUserId, cancellationToken);
         return ToCustomerDto(customer, null, null);
     }
 
@@ -350,6 +351,13 @@ public sealed class CustomerRepository : ICustomerRepository
     {
         var userId = userIds?.FirstOrDefault(id => id > 0) ?? 0;
         return userId > 0 ? userId : null;
+    }
+
+    private static IReadOnlyCollection<ulong>? AssignedUserIdsOrCreator(IReadOnlyCollection<ulong>? assignedUserIds, ulong? actorUserId)
+    {
+        var ids = assignedUserIds?.Where(id => id > 0).Distinct().ToArray() ?? [];
+        if (ids.Length > 0) return ids;
+        return actorUserId.HasValue && actorUserId.Value > 0 ? [actorUserId.Value] : assignedUserIds;
     }
 
     private async Task SyncCustomerAssignmentsAsync(ulong customerId, IReadOnlyCollection<ulong>? assignedUserIds, ulong? actorUserId, CancellationToken cancellationToken)

@@ -125,6 +125,9 @@ public sealed class MobileAppController : ControllerBase
         fields["customer_type"] = customerType.ToString();
         await ApplyMobileCustomerAddressFields(fields, request, cancellationToken);
         SetIfPresent(fields, "distributor_name", request.DealerId?.ToString());
+        var assignedUserIds = await MobileAssignedUserIds(request, cancellationToken);
+        var assignedUserId = assignedUserIds.FirstOrDefault();
+        SetMobileAssignmentFields(fields, assignedUserIds);
 
         var now = DateTime.UtcNow;
         var customer = new Customer
@@ -137,6 +140,9 @@ public sealed class MobileAppController : ControllerBase
             Email = request.Email?.Trim().ToLowerInvariant(),
             CustomerType = customerType,
             CustomerCode = $"{(customerType == RetailerType ? "RET" : "INF")}-{now:yyMMddHHmmss}",
+            ExecutiveId = assignedUserId > 0 ? assignedUserId : null,
+            CreatedBy = assignedUserId > 0 ? assignedUserId : null,
+            UpdatedBy = assignedUserId > 0 ? assignedUserId : null,
             CustomFields = JsonSerializer.Serialize(fields, JsonOptions),
             CreatedAt = now,
             UpdatedAt = now
@@ -145,6 +151,7 @@ public sealed class MobileAppController : ControllerBase
         await _dbContext.Customers.AddAsync(customer, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
         await SyncMobileCustomerAddressAsync(customer.Id, fields, cancellationToken);
+        await SyncMobileEmployeeDetailsAsync(customer.Id, assignedUserIds, cancellationToken);
 
         var token = _tokenService.CreateAccessToken("customers", customer.Id, DisplayName(customer), [], out var tokenId);
         await StoreCustomerTokenAndLogin(customer.Id, tokenId, request, cancellationToken);
@@ -507,13 +514,17 @@ public sealed class MobileAppController : ControllerBase
         SetIfPresent(fields, "owner_name", ownerName);
         SetIfPresent(fields, "shop_name", shopName);
         await ApplyMobileCustomerAddressFields(fields, request, cancellationToken);
+        var assignedUserIds = await MobileAssignedUserIds(request, cancellationToken);
+        SetMobileAssignmentFields(fields, assignedUserIds);
         customer.FirstName = ownerName ?? customer.FirstName;
         customer.Name = shopName ?? customer.Name;
         customer.Email = request.Email?.Trim().ToLowerInvariant() ?? customer.Email;
+        if (assignedUserIds.Count > 0) customer.ExecutiveId = assignedUserIds.First();
         customer.CustomFields = JsonSerializer.Serialize(fields, JsonOptions);
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
         await SyncMobileCustomerAddressAsync(customer.Id, fields, cancellationToken);
+        await SyncMobileEmployeeDetailsAsync(customer.Id, assignedUserIds, cancellationToken);
         return Ok(await ToMobileProfile(customer, cancellationToken));
     }
 
@@ -1003,6 +1014,61 @@ public sealed class MobileAppController : ControllerBase
         }, cancellationToken);
     }
 
+    private async Task<List<ulong>> MobileAssignedUserIds(RegisterRequest request, CancellationToken cancellationToken)
+    {
+        var candidateIds = new[]
+        {
+            GetULong(request.Extra, "employee_id"),
+            GetULong(request.Extra, "sales_executive_id"),
+            GetULong(request.Extra, "sales_executive_id[0]"),
+            GetULong(request.Extra, "supervisor_id"),
+            GetULong(request.Extra, "user_id"),
+            GetULong(request.Extra, "created_by")
+        }
+            .Where(id => id.HasValue && id.Value > 0)
+            .Select(id => id!.Value)
+            .Distinct()
+            .ToArray();
+
+        if (candidateIds.Length == 0) return [];
+
+        return await _dbContext.Users.AsNoTracking()
+            .Where(user => candidateIds.Contains(user.Id) && user.DeletedAt == null)
+            .Select(user => user.Id)
+            .ToListAsync(cancellationToken);
+    }
+
+    private static void SetMobileAssignmentFields(IDictionary<string, string?> fields, IReadOnlyCollection<ulong> userIds)
+    {
+        if (userIds.Count == 0) return;
+        var ids = string.Join(',', userIds);
+        fields["employee_id"] = ids;
+        fields["sales_executive_id"] = ids;
+    }
+
+    private async Task SyncMobileEmployeeDetailsAsync(ulong customerId, IReadOnlyCollection<ulong> userIds, CancellationToken cancellationToken)
+    {
+        foreach (var userId in userIds.Where(id => id > 0).Distinct())
+        {
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                @"UPDATE employee_details
+SET active = 'Y', deleted_at = NULL, updated_by = {1}, updated_at = UTC_TIMESTAMP()
+WHERE customer_id = {0} AND user_id = {1} AND deleted_at IS NOT NULL",
+                [customerId, userId],
+                cancellationToken);
+
+            await _dbContext.Database.ExecuteSqlRawAsync(
+                @"INSERT INTO employee_details (active, customer_id, user_id, created_by, created_at, updated_at)
+SELECT 'Y', {0}, {1}, {1}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
+WHERE NOT EXISTS (
+    SELECT 1 FROM employee_details
+    WHERE customer_id = {0} AND user_id = {1} AND deleted_at IS NULL
+)",
+                [customerId, userId],
+                cancellationToken);
+        }
+    }
+
     private object ToProfile(Customer customer)
     {
         var fields = ReadFields(customer);
@@ -1310,6 +1376,9 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
 
     private static string? GetString(Dictionary<string, JsonElement> values, string key) =>
         values.TryGetValue(key, out var value) ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString() : null;
+
+    private static ulong? GetULong(Dictionary<string, JsonElement> values, string key) =>
+        ulong.TryParse(GetString(values, key), out var id) && id > 0 ? id : null;
 
     private static void SetIfPresent(IDictionary<string, string?> fields, string key, string? value)
     {
