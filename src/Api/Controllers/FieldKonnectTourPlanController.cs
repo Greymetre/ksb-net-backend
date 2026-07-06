@@ -65,7 +65,6 @@ ORDER BY c.city_name ASC", cancellationToken, parameters.ToArray());
             var perPage = Math.Clamp((int)(ULongValue("per_page") ?? ULongValue("pageSize") ?? 20), 1, 200);
             var offset = (page - 1) * perPage;
             var (where, parameters) = await UserFilterWhere(userIds, cancellationToken);
-            where = $"(({where}) OR u.id = @auth_user)";
             parameters.Add(("@auth_user", authUserId));
             var total = await QueryScalarLong($"SELECT COUNT(DISTINCT u.id) FROM users u LEFT JOIN divisions d ON d.id = u.division_id WHERE {where}", cancellationToken, parameters.ToArray());
             var lastPage = total == 0 ? 1 : (long)Math.Ceiling(total / (double)perPage);
