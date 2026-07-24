@@ -235,7 +235,7 @@ public sealed class NewInvoiceService : INewInvoiceService
 
         var eligibleSchemes = await _repository.GetEligibleSchemeOptionsAsync(request.SecondaryCustomerId, request.InvoiceDate!.Value, cancellationToken);
         if (!eligibleSchemes.Any(x => x.Id == request.SchemeId!.Value))
-            throw Http(LaravelStatusCodes.NoContentLikeValidation, new { scheme_id = new[] { "The selected scheme is not active for the invoice date or has expired." } });
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, new { scheme_id = new[] { "The selected scheme was not published and active for the invoice date." } });
     }
 
     private async Task<NewInvoiceDto> GetOrThrowAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken) =>

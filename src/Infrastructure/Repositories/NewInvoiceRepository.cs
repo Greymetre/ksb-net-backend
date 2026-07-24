@@ -102,17 +102,17 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     public async Task<IReadOnlyCollection<InvoiceSchemeOptionDto>> GetEligibleSchemeOptionsAsync(ulong customerId, DateTime invoiceDate, CancellationToken cancellationToken)
     {
         var date = DateOnly.FromDateTime(invoiceDate.Date);
-        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5.5));
         var customer = await _dbContext.Customers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == customerId && x.Active == "Y", cancellationToken);
         if (customer is null) return [];
 
+        // Scheme eligibility is based on the invoice's transaction date. A
+        // published scheme may be expired today but is still valid for an old
+        // invoice whose date falls within the scheme period.
         var schemes = await _dbContext.LoyaltySchemes.AsNoTracking()
             .Where(x => x.DeletedAt == null
                 && x.Active == "Y"
                 && (x.Status == "Published" || x.Status == "Live")
                 && x.SchemeType == "Invoice"
-                && x.StartDate <= today
-                && x.EndDate >= today
                 && x.StartDate <= date
                 && x.EndDate >= date)
             .OrderBy(x => x.SchemeName)
@@ -493,7 +493,10 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     {
         var invoiceDate = DateOnly.FromDateTime(invoice.InvoiceDate.Date);
         var selectedScheme = invoice.LoyaltySchemeId.HasValue
-            ? schemes.FirstOrDefault(scheme => scheme.Id == invoice.LoyaltySchemeId.Value)
+            ? schemes.FirstOrDefault(scheme =>
+                scheme.Id == invoice.LoyaltySchemeId.Value
+                && invoiceDate >= scheme.StartDate
+                && invoiceDate <= scheme.EndDate)
             : null;
         if (selectedScheme is null)
             return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null, approvalSummary)];

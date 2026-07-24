@@ -676,7 +676,9 @@ INNER JOIN (
             foreach (var row in rows)
             {
                 var invoiceDate = DateOnly.FromDateTime(row.Invoice.InvoiceDate.Date);
-                var matchingSchemes = schemes.Where(scheme => SchemeMatchesCustomer(scheme, invoiceDate, customer, row.Branch, zoneName));
+                var matchingSchemes = schemes.Where(scheme =>
+                    row.Invoice.LoyaltySchemeId == scheme.Id
+                    && SchemeMatchesCustomer(scheme, invoiceDate, customer, row.Branch, zoneName));
                 foreach (var scheme in matchingSchemes)
                 {
                     var periodAmount = PeriodAmount(customer.Id, scheme, rows.Select(x => x.Invoice));
@@ -753,6 +755,7 @@ INNER JOIN (
         var endDate = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
         return invoices
             .Where(x => x.SecondaryCustomerId == customerId
+                && x.LoyaltySchemeId == scheme.Id
                 && x.InvoiceDate >= startDate
                 && x.InvoiceDate <= endDate)
             .Sum(x => x.Amount);
