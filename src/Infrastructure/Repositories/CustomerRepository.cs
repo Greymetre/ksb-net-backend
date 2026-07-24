@@ -658,6 +658,19 @@ INNER JOIN (
 
         if (rows.Count > 0)
         {
+            var invoiceIds = rows.Select(x => x.Invoice.Id).ToArray();
+            var hoApprovalRows = await _dbContext.NewInvoiceApprovalLogs.AsNoTracking()
+                .Where(x => x.NewInvoiceId.HasValue
+                    && invoiceIds.Contains(x.NewInvoiceId.Value)
+                    && x.ToStatus == NewInvoice.StatusApprovedHo)
+                .OrderByDescending(x => x.CreatedAt)
+                .ThenByDescending(x => x.Id)
+                .Select(x => new { InvoiceId = x.NewInvoiceId!.Value, x.ApprovedAmount })
+                .ToListAsync(cancellationToken);
+            var hoApprovedAmounts = hoApprovalRows
+                .GroupBy(x => x.InvoiceId)
+                .ToDictionary(x => x.Key, x => x.First().ApprovedAmount);
+
             var dates = rows.Select(x => DateOnly.FromDateTime(x.Invoice.InvoiceDate.Date)).ToArray();
             var minDate = dates.Min();
             var maxDate = dates.Max();
@@ -681,8 +694,9 @@ INNER JOIN (
                     && SchemeMatchesCustomer(scheme, invoiceDate, customer, row.Branch, zoneName));
                 foreach (var scheme in matchingSchemes)
                 {
-                    var periodAmount = PeriodAmount(customer.Id, scheme, rows.Select(x => x.Invoice));
-                    var points = CalculateSchemePoints(row.Invoice.Amount, periodAmount, scheme);
+                    var periodAmount = PeriodAmount(customer.Id, scheme, rows.Select(x => x.Invoice), hoApprovedAmounts);
+                    var approvedInvoiceAmount = hoApprovedAmounts.GetValueOrDefault(row.Invoice.Id) ?? row.Invoice.Amount;
+                    var points = CalculateSchemePoints(approvedInvoiceAmount, periodAmount, scheme);
                     if (points <= 0) continue;
 
                     customerDto.TotalPoints += points;
@@ -749,7 +763,11 @@ INNER JOIN (
         || string.Equals(customerType, "Influencer", StringComparison.OrdinalIgnoreCase)
         || string.Equals(customerType, "Retailer + Plumber", StringComparison.OrdinalIgnoreCase);
 
-    private static decimal PeriodAmount(ulong customerId, LoyaltyScheme scheme, IEnumerable<NewInvoice> invoices)
+    private static decimal PeriodAmount(
+        ulong customerId,
+        LoyaltyScheme scheme,
+        IEnumerable<NewInvoice> invoices,
+        IReadOnlyDictionary<ulong, decimal?> hoApprovedAmounts)
     {
         var startDate = scheme.StartDate.ToDateTime(TimeOnly.MinValue);
         var endDate = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
@@ -758,7 +776,7 @@ INNER JOIN (
                 && x.LoyaltySchemeId == scheme.Id
                 && x.InvoiceDate >= startDate
                 && x.InvoiceDate <= endDate)
-            .Sum(x => x.Amount);
+            .Sum(x => hoApprovedAmounts.GetValueOrDefault(x.Id) ?? x.Amount);
     }
 
     private static decimal CalculateSchemePoints(decimal invoiceAmount, decimal periodAmount, LoyaltyScheme scheme)

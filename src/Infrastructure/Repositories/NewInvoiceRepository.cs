@@ -476,14 +476,31 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         var minDate = schemes.Min(x => x.StartDate).ToDateTime(TimeOnly.MinValue);
         var maxDate = schemes.Max(x => x.EndDate).ToDateTime(TimeOnly.MaxValue);
 
-        // Slab eligibility is based only on finalized invoice turnover.
-        return await _dbContext.NewInvoices.AsNoTracking()
+        // Slab eligibility is based only on finalized HO-approved turnover.
+        var invoices = await _dbContext.NewInvoices.AsNoTracking()
             .Where(x => ids.Contains(x.SecondaryCustomerId)
                 && x.ApprovalStatus == NewInvoice.StatusApprovedHo
                 && x.InvoiceDate >= minDate
                 && x.InvoiceDate <= maxDate)
             .Select(x => new SchemeInvoiceAmount(x.Id, x.SecondaryCustomerId, x.LoyaltySchemeId, x.InvoiceDate, x.Amount))
             .ToListAsync(cancellationToken);
+
+        var invoiceIds = invoices.Select(x => x.InvoiceId).ToArray();
+        var hoApprovalAmounts = await _dbContext.NewInvoiceApprovalLogs.AsNoTracking()
+            .Where(x => x.NewInvoiceId.HasValue
+                && invoiceIds.Contains(x.NewInvoiceId.Value)
+                && x.ToStatus == NewInvoice.StatusApprovedHo)
+            .OrderByDescending(x => x.CreatedAt)
+            .ThenByDescending(x => x.Id)
+            .Select(x => new { InvoiceId = x.NewInvoiceId!.Value, x.ApprovedAmount })
+            .ToListAsync(cancellationToken);
+        var latestAmounts = hoApprovalAmounts
+            .GroupBy(x => x.InvoiceId)
+            .ToDictionary(x => x.Key, x => x.First().ApprovedAmount);
+
+        return invoices
+            .Select(x => x with { Amount = latestAmounts.GetValueOrDefault(x.InvoiceId) ?? x.Amount })
+            .ToList();
     }
 
     private static ApprovalStageSummary ApprovalSummary(ulong invoiceId, IReadOnlyDictionary<ulong, ApprovalStageSummary> approvals) =>
@@ -502,7 +519,18 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null, approvalSummary)];
 
         var periodAmount = PeriodAmount(invoice, selectedScheme, schemeInvoices);
-        return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, selectedScheme, CalculateSchemeResult(invoice.Amount, periodAmount, selectedScheme), approvalSummary)];
+        // Pending invoices are not part of finalized turnover yet, but their
+        // expected reward must be previewed using the turnover that would
+        // result if this invoice receives final HO approval.
+        if (invoice.ApprovalStatus != NewInvoice.StatusApprovedHo
+            && invoice.ApprovalStatus != NewInvoice.StatusRejected)
+        {
+            periodAmount += invoice.Amount;
+        }
+        var rewardBaseAmount = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo
+            ? approvalSummary.HoApprovedAmount ?? invoice.Amount
+            : invoice.Amount;
+        return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, selectedScheme, CalculateSchemeResult(rewardBaseAmount, periodAmount, selectedScheme), approvalSummary)];
     }
 
     private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult, ApprovalStageSummary approvalSummary)

@@ -857,7 +857,7 @@ public sealed class MobileAppController : ControllerBase
         var end = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
         var invoiceAmount = approvedInvoices
             .Where(x => x.InvoiceDate >= start && x.InvoiceDate <= end)
-            .Sum(x => x.Amount);
+            .Sum(x => x.HoApprovedAmount ?? x.Amount);
         var slabs = scheme.Slabs
             .OrderBy(x => x.ValueFrom)
             .ThenBy(x => x.SortOrder)
@@ -926,7 +926,7 @@ public sealed class MobileAppController : ControllerBase
             .GroupBy(x => x.Id)
             .Select(x => x.First())
             .ToList();
-        var invoiceAmount = approvedInvoices.Sum(x => x.Amount);
+        var invoiceAmount = approvedInvoices.Sum(x => x.HoApprovedAmount ?? x.Amount);
 
         return new DashboardWalletCardDto
         {
@@ -995,7 +995,7 @@ public sealed class MobileAppController : ControllerBase
                 .ToList() ?? [];
             var achievementValue = schemeInvoices
                 .Where(invoice => invoice.ApprovalStatus == NewInvoice.StatusApprovedHo)
-                .Sum(invoice => invoice.Amount);
+                .Sum(invoice => invoice.HoApprovedAmount ?? invoice.Amount);
             var pendingInvoices = schemeInvoices
                 .Where(invoice => invoice.ApprovalStatus != NewInvoice.StatusApprovedHo
                     && invoice.ApprovalStatus != NewInvoice.StatusRejected)
