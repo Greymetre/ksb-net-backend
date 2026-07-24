@@ -18,6 +18,7 @@ namespace Api.Controllers;
 [Route("api")]
 public sealed class MobileAppController : ControllerBase
 {
+    private const ulong DealerType = 1;
     private const ulong RetailerType = 2;
     private const ulong InfluencerType = 3;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -139,7 +140,7 @@ public sealed class MobileAppController : ControllerBase
             ContactNumber = mobile,
             Email = request.Email?.Trim().ToLowerInvariant(),
             CustomerType = customerType,
-            CustomerCode = $"{(customerType == RetailerType ? "RET" : "INF")}-{now:yyMMddHHmmss}",
+            CustomerCode = $"{CustomerTypePrefix(customerType)}-{now:yyMMddHHmmss}",
             ExecutiveId = assignedUserId > 0 ? assignedUserId : null,
             CreatedBy = assignedUserId > 0 ? assignedUserId : null,
             UpdatedBy = assignedUserId > 0 ? assignedUserId : null,
@@ -234,10 +235,9 @@ public sealed class MobileAppController : ControllerBase
         status = "success",
         data = new[]
         {
+            new { id = DealerType, name = "Dealer", type_name = "Dealer" },
             new { id = RetailerType, name = "Retailer", type_name = "Retailer" },
-            new { id = InfluencerType, name = "Influencers", type_name = "Influencers" },
-            new { id = InfluencerType, name = "Sub-Dealer", type_name = "Influencers" },
-            new { id = InfluencerType, name = "Plumber", type_name = "Influencers" }
+            new { id = InfluencerType, name = "Influencer", type_name = "Influencer" }
         }
     });
 
@@ -576,7 +576,7 @@ public sealed class MobileAppController : ControllerBase
     }
 
     private IQueryable<Customer> FindMobileCustomer(string mobile) =>
-        _dbContext.Customers.Where(x => x.Active == "Y" && (x.CustomerType == RetailerType || x.CustomerType == InfluencerType) && (x.Mobile == mobile || x.ContactNumber == mobile || (x.CustomFields != null && x.CustomFields.Contains(mobile))));
+        _dbContext.Customers.Where(x => x.Active == "Y" && (x.CustomerType == DealerType || x.CustomerType == RetailerType || x.CustomerType == InfluencerType) && (x.Mobile == mobile || x.ContactNumber == mobile || (x.CustomFields != null && x.CustomFields.Contains(mobile))));
 
     private async Task<Customer?> CurrentCustomer(CancellationToken cancellationToken)
     {
@@ -1141,7 +1141,7 @@ WHERE NOT EXISTS (
             mobile = customer.Mobile,
             email = customer.Email,
             customer_type = customer.CustomerType,
-            customer_type_name = customer.CustomerType == InfluencerType ? "Influencers" : "Retailer",
+            customer_type_name = CustomerTypeName(customer.CustomerType),
             profile_image = customer.ProfileImage,
             shop_image = customer.ShopImage,
             kyc = KycState(fields),
@@ -1164,7 +1164,7 @@ WHERE NOT EXISTS (
             shop_name = Field(fields, "shop_name") ?? customer.Name ?? string.Empty,
             mobile = customer.Mobile ?? string.Empty,
             email = customer.Email ?? string.Empty,
-            customer_type_name = customer.CustomerType == InfluencerType ? "Influencers" : "Retailer",
+            customer_type_name = CustomerTypeName(customer.CustomerType),
             kyc = new { status = KycStatusValue(fields) },
             custom_fields = new
             {
@@ -1423,15 +1423,36 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
 
     private static ulong ResolveCustomerType(string? appType, ulong? customerType, string? customerTypeText)
     {
+        if (customerType == DealerType || ContainsDealer(appType) || ContainsDealer(customerTypeText)) return DealerType;
         if (customerType == InfluencerType || ContainsInfluencer(appType) || ContainsInfluencer(customerTypeText)) return InfluencerType;
         return RetailerType;
     }
+
+    private static bool ContainsDealer(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && (value.Equals("dealer", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("distributor", StringComparison.OrdinalIgnoreCase));
 
     private static bool ContainsInfluencer(string? value) =>
         !string.IsNullOrWhiteSpace(value)
         && (value.Contains("influencer", StringComparison.OrdinalIgnoreCase)
             || value.Contains("plumber", StringComparison.OrdinalIgnoreCase)
             || value.Contains("sub", StringComparison.OrdinalIgnoreCase));
+
+    private static string CustomerTypeName(ulong? customerType) => customerType switch
+    {
+        DealerType => "Dealer",
+        RetailerType => "Retailer",
+        InfluencerType => "Influencer",
+        _ => "Customer"
+    };
+
+    private static string CustomerTypePrefix(ulong customerType) => customerType switch
+    {
+        DealerType => "DLR",
+        InfluencerType => "INF",
+        _ => "RET"
+    };
 
     private static string? GetString(Dictionary<string, JsonElement> values, string key) =>
         values.TryGetValue(key, out var value) ? value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString() : null;
@@ -1575,6 +1596,12 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
 
     private static bool SchemeCustomerTypeMatches(string customerType, ulong? actualCustomerType)
     {
+        if (actualCustomerType == DealerType)
+        {
+            return customerType.Contains("Dealer", StringComparison.OrdinalIgnoreCase)
+                || customerType.Contains("Distributor", StringComparison.OrdinalIgnoreCase);
+        }
+
         if (actualCustomerType == RetailerType)
         {
             return customerType.Contains("Retailer", StringComparison.OrdinalIgnoreCase);

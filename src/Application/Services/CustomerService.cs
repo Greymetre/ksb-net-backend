@@ -290,9 +290,9 @@ public sealed class CustomerService : ICustomerService
 
     private static string CustomerTypeName(ulong? type) => type switch
     {
-        1 => "Distributor",
+        1 => "Dealer",
         2 => "Retailer",
-        3 => "Influencers",
+        3 => "Influencer",
         null => "All",
         _ => $"Type-{type}"
     };
@@ -413,9 +413,20 @@ public sealed class CustomerService : ICustomerService
         return new MasterDataImportResultDto { TotalRows = totalRows, ImportedRows = importedRows, UpdatedRows = updatedRows, FailedRows = errors.Count, Errors = errors };
     }
 
-    private static string NormalizeHeading(string heading) => heading.Trim().ToLowerInvariant().Replace(" ", "_");
+    private static string NormalizeHeading(string heading) =>
+        heading.Trim()
+            .ToLowerInvariant()
+            .Replace(" ", "_")
+            .Replace("agri_dealer", "agri_distributor")
+            .Replace("dealer_name", "distributor_name")
+            .Replace("dealer_code", "distributor_code");
 
-    private static string TitleCaseHeading(string heading) => TitleCase(heading.Replace("_", " "));
+    private static string TitleCaseHeading(string heading) =>
+        TitleCase(heading
+            .Replace("agri_distributor", "agri_dealer")
+            .Replace("distributor_name", "dealer_name")
+            .Replace("distributor_code", "dealer_code")
+            .Replace("_", " "));
 
     private static string TitleCase(string value)
     {
@@ -474,11 +485,12 @@ public sealed class CustomerService : ICustomerService
 
             return value.Trim().ToLowerInvariant() switch
             {
+                "dealer" => 1,
                 "distributor" => 1,
                 "retailer" => 2,
                 "influencer" => 3,
                 "influencers" => 3,
-                _ => throw new FormatException($"{heading} must be Distributor, Retailer, Influencers, 1, 2, or 3.")
+                _ => throw new FormatException($"{heading} must be Dealer, Retailer, Influencer, 1, 2, or 3.")
             };
         }
     }

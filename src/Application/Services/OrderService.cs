@@ -38,12 +38,12 @@ public sealed class OrderService : IOrderService
 
     public async Task<LaravelApiResponse> CreateOrderAsync(OrderRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
-        RequireId(request.SellerId, "Dealer / Distributor is required.");
+        RequireId(request.SellerId, "Dealer is required.");
         RequireId(request.ExecutiveId, "Employee is required.");
         RequireValue(request.Type, "Customer Type is required.");
 
-        var type = request.Type!.Trim().ToUpperInvariant();
-        if (type != "DISTRIBUTER") RequireId(request.BuyerId, "Customer is required.");
+        var type = NormalizeCustomerType(request.Type);
+        if (type != "DEALER") RequireId(request.BuyerId, "Customer is required.");
         if (request.OrderDetail.Count == 0) throw BadRequest("At least one order item is required.");
 
         var rows = request.OrderDetail.Where(x => x.ProductId.HasValue && (x.Quantity ?? 0) > 0).ToArray();
@@ -53,7 +53,7 @@ public sealed class OrderService : IOrderService
         var order = new Order
         {
             Active = "Y",
-            BuyerId = type == "DISTRIBUTER" ? null : request.BuyerId,
+            BuyerId = type == "DEALER" ? null : request.BuyerId,
             SellerId = request.SellerId,
             ExecutiveId = request.ExecutiveId,
             TotalQty = ToLongQuantity(request.TotalQty ?? rows.Sum(x => x.Quantity ?? 0)),
@@ -63,7 +63,7 @@ public sealed class OrderService : IOrderService
             SubTotal = request.SubTotal ?? rows.Sum(x => x.LineTotal ?? 0),
             GrandTotal = request.GrandTotal ?? rows.Sum(x => x.LineTotal ?? 0),
             OrderTaking = "Web",
-            OrderType = type == "DISTRIBUTER" ? "MASTER_DISTRIBUTER" : "SECONDARY_CUSTOMER",
+            OrderType = type == "DEALER" ? "MASTER_DISTRIBUTER" : "SECONDARY_CUSTOMER",
             OrderRemark = request.OrderRemark,
             CreatedBy = actorUserId,
             CreatedAt = now,
@@ -108,7 +108,7 @@ public sealed class OrderService : IOrderService
 
     public async Task<LaravelApiResponse> UpdateOrderAsync(ulong id, OrderRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
-        RequireId(request.SellerId, "Dealer / Distributor is required.");
+        RequireId(request.SellerId, "Dealer is required.");
         RequireId(request.ExecutiveId, "Employee is required.");
         RequireValue(request.Type, "Customer Type is required.");
 
@@ -116,11 +116,11 @@ public sealed class OrderService : IOrderService
         var rows = request.OrderDetail.Where(x => x.ProductId.HasValue && (x.Quantity ?? 0) > 0).ToArray();
         if (rows.Length == 0) throw BadRequest("At least one valid product row is required.");
 
-        var type = request.Type!.Trim().ToUpperInvariant();
-        if (type != "DISTRIBUTER") RequireId(request.BuyerId, "Customer is required.");
+        var type = NormalizeCustomerType(request.Type);
+        if (type != "DEALER") RequireId(request.BuyerId, "Customer is required.");
 
         var now = DateTime.Now;
-        order.BuyerId = type == "DISTRIBUTER" ? null : request.BuyerId;
+        order.BuyerId = type == "DEALER" ? null : request.BuyerId;
         order.SellerId = request.SellerId;
         order.ExecutiveId = request.ExecutiveId;
         order.TotalQty = ToLongQuantity(request.TotalQty ?? rows.Sum(x => x.Quantity ?? 0));
@@ -128,7 +128,7 @@ public sealed class OrderService : IOrderService
         order.TotalGst = request.TotalGst ?? rows.Sum(x => x.TaxAmount ?? 0);
         order.SubTotal = request.SubTotal ?? rows.Sum(x => x.LineTotal ?? 0);
         order.GrandTotal = request.GrandTotal ?? rows.Sum(x => x.LineTotal ?? 0);
-        order.OrderType = type == "DISTRIBUTER" ? "MASTER_DISTRIBUTER" : "SECONDARY_CUSTOMER";
+        order.OrderType = type == "DEALER" ? "MASTER_DISTRIBUTER" : "SECONDARY_CUSTOMER";
         order.OrderRemark = request.OrderRemark;
         order.UpdatedBy = actorUserId;
         order.UpdatedAt = now;
@@ -214,8 +214,8 @@ public sealed class OrderService : IOrderService
         var headings = new[]
         {
             "Order Date", "Order No", "Employee Name", "Reporting Manager", "Designation", "Branch",
-            "Retailer Name", "Distributor Name", "Distributor Code", "Product Code", "Product Name",
-            "Quantity", "Rate", "Total Order Value", "Employee Code", "Retailer ID", "Distributor ID",
+            "Retailer Name", "Dealer Name", "Dealer Code", "Product Code", "Product Name",
+            "Quantity", "Rate", "Total Order Value", "Employee Code", "Retailer ID", "Dealer ID",
             "Order Remark", "Segment", "Family", "id", "Zone"
         };
 
@@ -267,6 +267,18 @@ public sealed class OrderService : IOrderService
     private static void RequireValue(string? value, string message)
     {
         if (string.IsNullOrWhiteSpace(value)) throw BadRequest(message);
+    }
+
+    private static string NormalizeCustomerType(string? value)
+    {
+        var normalized = value?.Trim().ToUpperInvariant();
+        return normalized switch
+        {
+            "DEALER" or "DISTRIBUTOR" or "DISTRIBUTER" => "DEALER",
+            "RETAILER" => "RETAILER",
+            "INFLUENCER" or "INFLUENCERS" => "INFLUENCER",
+            _ => throw BadRequest("Customer Type must be Dealer, Retailer or Influencer.")
+        };
     }
 
     private static void RequireId(ulong? value, string message)

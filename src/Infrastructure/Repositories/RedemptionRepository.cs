@@ -144,9 +144,9 @@ public sealed class RedemptionRepository : IRedemptionRepository
 
     private static string CustomerTypeName(ulong? type) => type switch
     {
-        1 => "Distributor",
+        1 => "Dealer",
         2 => "Retailer",
-        3 => "Influencers",
+        3 => "Influencer",
         null => string.Empty,
         _ => $"Type {type}"
     };

@@ -69,8 +69,15 @@ public sealed class LoyaltySchemesController : ControllerBase
     [HttpPatch("{id}")]
     public async Task<IActionResult> UpdateScheme(ulong id, [FromBody] LoyaltySchemeRequestDto request, CancellationToken cancellationToken)
     {
-        var response = await _loyaltySchemeService.UpdateSchemeAsync(id, request, CurrentUserId(), cancellationToken);
+        var response = await _loyaltySchemeService.UpdateSchemeAsync(id, request, CurrentUserId(), IsSuperAdmin(), cancellationToken);
         return Ok(response);
+    }
+
+    [RequirePermission("scheme_edit")]
+    [HttpPost("{id}/draft")]
+    public async Task<IActionResult> SendToDraft(ulong id, CancellationToken cancellationToken)
+    {
+        return Ok(await _loyaltySchemeService.SendToDraftAsync(id, CurrentUserId(), IsSuperAdmin(), cancellationToken));
     }
 
     [RequirePermission("scheme_submit")]
@@ -126,7 +133,7 @@ public sealed class LoyaltySchemesController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteScheme(ulong id, CancellationToken cancellationToken)
     {
-        var response = await _loyaltySchemeService.DeleteSchemeAsync(id, cancellationToken);
+        var response = await _loyaltySchemeService.DeleteSchemeAsync(id, CurrentUserId(), IsSuperAdmin(), cancellationToken);
         return Ok(response);
     }
 
@@ -135,4 +142,8 @@ public sealed class LoyaltySchemesController : ControllerBase
         var subject = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return ulong.TryParse(subject, out var userId) ? userId : null;
     }
+
+    private bool IsSuperAdmin() =>
+        User.Claims.Any(claim => claim.Type == ClaimTypes.Role
+            && string.Equals(claim.Value, "superadmin", StringComparison.OrdinalIgnoreCase));
 }

@@ -61,8 +61,9 @@ public sealed class LoyaltySchemeSlabConfiguration : IEntityTypeConfiguration<Lo
         builder.Property(x => x.SortOrder).HasColumnName("sort_order");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");
         builder.Property(x => x.UpdatedAt).HasColumnName("updated_at");
-        builder.Ignore(x => x.DeletedAt);
+        builder.Property(x => x.DeletedAt).HasColumnName("deleted_at");
 
         builder.HasIndex(x => x.LoyaltySchemeId);
+        builder.HasQueryFilter(x => x.DeletedAt == null);
     }
 }

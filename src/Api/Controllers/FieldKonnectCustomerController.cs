@@ -451,8 +451,13 @@ ORDER BY {(filter.Latest ? "c.id DESC" : filter.OrderByName ? "c.name ASC" : "c.
 
     private async Task<IReadOnlyList<object>> CustomerTypes(CancellationToken cancellationToken)
     {
-        var rows = await QueryRows("SELECT id, customertype_name FROM customer_types WHERE deleted_at IS NULL", cancellationToken);
-        return rows.Select(x => (object)new { id = ULong(x, "id"), customertype_name = Str(x, "customertype_name") }).ToList();
+        await Task.CompletedTask;
+        return
+        [
+            new { id = 1UL, customertype_name = "Dealer" },
+            new { id = 2UL, customertype_name = "Retailer" },
+            new { id = 3UL, customertype_name = "Influencer" }
+        ];
     }
 
     private async Task UpsertAddress(ulong customerId, CustomerMutationForm request, CancellationToken cancellationToken)

@@ -1494,6 +1494,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
 
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("deleted_at");
+
                     b.Property<ulong>("LoyaltySchemeId")
                         .HasColumnType("bigint unsigned")
                         .HasColumnName("loyalty_scheme_id");

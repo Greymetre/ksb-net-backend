@@ -259,7 +259,7 @@ public sealed class CustomerRepository : ICustomerRepository
             ReadCustomerField(customer, "contact_person"),
             ReadCustomerField(customer, "trade_name"),
             ReadCustomerField(customer, "legal_name"),
-            customer.Name) ?? $"Distributor {customer.Id}";
+            customer.Name) ?? $"Dealer {customer.Id}";
         var (firstName, lastName) = SplitName(name);
         var role = await EnsureDistributorRoleAsync(cancellationToken);
 
@@ -835,9 +835,9 @@ INNER JOIN (
 
     private static string CustomerTypeName(ulong? type) => type switch
     {
-        1 => "Distributor",
+        1 => "Dealer",
         2 => "Retailer",
-        3 => "Influencers",
+        3 => "Influencer",
         null => string.Empty,
         _ => $"Type {type}"
     };

@@ -46,7 +46,7 @@ public sealed class RedemptionService : IRedemptionService
     {
         var redemptions = await _repository.GetRedemptionsAsync(filter, cancellationToken);
         return CreateWorkbook("redemptions.xlsx",
-            ["id", "date", "transaction_id", "customer_id", "customer", "type", "city", "mobile", "mode", "distributor", "wallet", "scheme", "points", "status", "created_by"],
+            ["id", "date", "transaction_id", "customer_id", "customer", "type", "city", "mobile", "mode", "dealer", "wallet", "scheme", "points", "status", "created_by"],
             redemptions.Select(x => new object?[]
             {
                 x.Id,

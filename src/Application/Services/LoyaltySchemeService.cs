@@ -13,7 +13,7 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly string[] SchemeTags = ["Regular", "Booster"];
-    private static readonly string[] CustomerTypes = ["Retailer", "Influencers", "Plumber", "Retailer + Plumber", "Sub-Dealer", "Distributor"];
+    private static readonly string[] CustomerTypes = ["Dealer", "Retailer", "Influencer"];
     private static readonly string[] AreaScopes = ["All", "Branch", "Zone", "State", "Customer"];
     private static readonly string[] BasedOnOptions = ["Value", "Percentage"];
     private readonly ILoyaltySchemeRepository _repository;
@@ -88,12 +88,12 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         return LaravelApiResponse.Success("scheme", created, "Scheme created successfully");
     }
 
-    public async Task<LaravelApiResponse> UpdateSchemeAsync(ulong id, LoyaltySchemeRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
+    public async Task<LaravelApiResponse> UpdateSchemeAsync(ulong id, LoyaltySchemeRequestDto request, ulong? actorUserId, bool isSuperAdmin, CancellationToken cancellationToken)
     {
         if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
         var scheme = await FindOrThrowAsync(id, cancellationToken);
-        if (scheme.Status is not ("Draft" or "Rejected"))
-            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only draft or rejected schemes can be edited.");
+        if (!isSuperAdmin && string.Equals(scheme.Status, "Published", StringComparison.OrdinalIgnoreCase))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "A published scheme can only be edited by superadmin.");
         await ValidateRequestAsync(request, id, true, cancellationToken);
 
         var now = DateTime.UtcNow;
@@ -112,7 +112,11 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         // publish or demote a scheme through a client-supplied status.
         scheme.UpdatedBy = actorUserId;
         scheme.UpdatedAt = now;
-        scheme.Slabs.Clear();
+        foreach (var existingSlab in scheme.Slabs.Where(slab => slab.DeletedAt == null))
+        {
+            existingSlab.DeletedAt = now;
+            existingSlab.UpdatedAt = now;
+        }
         foreach (var slab in MapSlabs(request.Slabs, now))
         {
             scheme.Slabs.Add(slab);
@@ -120,6 +124,30 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
 
         var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
         return LaravelApiResponse.Success("scheme", updated, "Scheme updated successfully");
+    }
+
+    public async Task<LaravelApiResponse> SendToDraftAsync(ulong id, ulong? actorUserId, bool isSuperAdmin, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (string.Equals(scheme.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Scheme is already in draft.");
+        if (!isSuperAdmin && string.Equals(scheme.Status, "Published", StringComparison.OrdinalIgnoreCase))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "A published scheme can only be returned to draft by superadmin.");
+
+        scheme.Status = "Draft";
+        scheme.SubmittedAt = null;
+        scheme.SubmittedBy = null;
+        scheme.ApprovedAt = null;
+        scheme.ApprovedBy = null;
+        scheme.ApprovalRemark = null;
+        scheme.RejectedAt = null;
+        scheme.RejectedBy = null;
+        scheme.RejectionRemark = null;
+        scheme.UpdatedBy = actorUserId;
+        scheme.UpdatedAt = DateTime.UtcNow;
+        var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
+        return LaravelApiResponse.Success("scheme", updated, "Scheme returned to draft successfully");
     }
 
     public async Task<LaravelApiResponse> ApproveSchemeAsync(ulong id, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
@@ -206,13 +234,15 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         return LaravelApiResponse.Success("scheme", updated, "Scheme brochure uploaded successfully");
     }
 
-    public async Task<LaravelApiResponse> DeleteSchemeAsync(ulong id, CancellationToken cancellationToken)
+    public async Task<LaravelApiResponse> DeleteSchemeAsync(ulong id, ulong? actorUserId, bool isSuperAdmin, CancellationToken cancellationToken)
     {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
         var scheme = await FindOrThrowAsync(id, cancellationToken);
-        if (scheme.Status is not ("Draft" or "Rejected"))
+        if (!isSuperAdmin && scheme.Status is not ("Draft" or "Rejected"))
             throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only draft or rejected schemes can be deleted.");
+        scheme.UpdatedBy = actorUserId;
         await _repository.DeleteSchemeAsync(scheme, cancellationToken);
-        return LaravelApiResponse.MessageOnly("success", "Scheme deleted successfully");
+        return LaravelApiResponse.MessageOnly("success", "Scheme and related configuration soft-deleted successfully");
     }
 
     private async Task ValidateRequestAsync(LoyaltySchemeRequestDto request, ulong? exceptId, bool allowBlankCode, CancellationToken cancellationToken)

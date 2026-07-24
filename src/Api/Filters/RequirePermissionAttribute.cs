@@ -48,6 +48,13 @@ public sealed class RequirePermissionFilter : IAsyncAuthorizationFilter
             return;
         }
 
+        if (user.Claims.Any(claim =>
+                claim.Type == ClaimTypes.Role
+                && string.Equals(claim.Value, "superadmin", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
         if (_permissions.Count == 0 || await HasAnyPermissionAsync(userId, context.HttpContext.RequestAborted))
         {
             return;
