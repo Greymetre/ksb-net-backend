@@ -12,17 +12,17 @@ public partial class AddSoftDeleteToLoyaltySchemeSlabs : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.Sql("""
-ALTER TABLE `loyalty_scheme_slabs`
-ADD COLUMN IF NOT EXISTS `deleted_at` datetime(6) NULL;
-""");
+        migrationBuilder.AddColumn<DateTime>(
+            name: "deleted_at",
+            table: "loyalty_scheme_slabs",
+            type: "datetime(6)",
+            nullable: true);
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.Sql("""
-ALTER TABLE `loyalty_scheme_slabs`
-DROP COLUMN IF EXISTS `deleted_at`;
-""");
+        migrationBuilder.DropColumn(
+            name: "deleted_at",
+            table: "loyalty_scheme_slabs");
     }
 }
