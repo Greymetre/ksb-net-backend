@@ -17,6 +17,13 @@ public sealed class LoyaltySchemeDto
     public string SchemeType { get; set; } = "Invoice";
     public string BasedOn { get; set; } = "Value";
     public string Status { get; set; } = "Draft";
+    public string WorkflowStatus { get; set; } = "Draft";
+    public string? BrochurePath { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public string? ApprovalRemark { get; set; }
+    public DateTime? RejectedAt { get; set; }
+    public string? RejectionRemark { get; set; }
     public ulong? CreatedBy { get; set; }
     public string? CreatedByName { get; set; }
     public DateTime? CreatedAt { get; set; }
@@ -63,6 +70,11 @@ public sealed class LoyaltySchemeFilterDto
 {
     public string? Search { get; set; }
     public string? Status { get; set; }
+}
+
+public sealed class LoyaltySchemeDecisionDto
+{
+    public string? Remark { get; set; }
 }
 
 public sealed class LoyaltySchemeOptionsDto

@@ -716,7 +716,11 @@ INSERT INTO `permissions` (`id`, `name`, `guard_name`, `created_at`, `updated_at
 (708, 'new_invoice_approve_ss', 'users', '2026-05-13 17:18:25', '2026-05-13 17:18:25'),
 (709, 'new_invoice_approve_sales', 'users', '2026-05-13 17:18:25', '2026-05-13 17:18:25'),
 (710, 'new_invoice_approve_ho', 'users', '2026-05-13 17:18:25', '2026-05-13 17:18:25'),
-(711, 'new_invoice_reject', 'users', '2026-05-13 17:18:25', '2026-05-13 17:18:25')
+(711, 'new_invoice_reject', 'users', '2026-05-13 17:18:25', '2026-05-13 17:18:25'),
+(712, 'scheme_approve', 'users', '2026-07-24 00:00:00', '2026-07-24 00:00:00'),
+(713, 'scheme_submit', 'users', '2026-07-24 00:00:00', '2026-07-24 00:00:00'),
+(714, 'scheme_reject', 'users', '2026-07-24 00:00:00', '2026-07-24 00:00:00'),
+(715, 'scheme_publish', 'users', '2026-07-24 00:00:00', '2026-07-24 00:00:00')
 ON DUPLICATE KEY UPDATE `name` = VALUES(`name`), `guard_name` = VALUES(`guard_name`), `created_at` = VALUES(`created_at`), `updated_at` = VALUES(`updated_at`);
 """"""";
         await db.Database.ExecuteSqlRawAsync(sql2, cancellationToken);

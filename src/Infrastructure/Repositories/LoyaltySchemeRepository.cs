@@ -34,7 +34,14 @@ public sealed class LoyaltySchemeRepository : ILoyaltySchemeRepository
         if (!string.IsNullOrWhiteSpace(filter.Status))
         {
             var status = filter.Status.Trim();
-            query = query.Where(x => x.Status == status);
+            var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5.5));
+            query = status switch
+            {
+                "Expired" => query.Where(x => x.EndDate < today),
+                "Live" => query.Where(x => (x.Status == "Published" || x.Status == "Live") && x.StartDate <= today && x.EndDate >= today),
+                "Approved" => query.Where(x => x.Status == "Approved" || ((x.Status == "Published" || x.Status == "Live") && x.StartDate > today)),
+                _ => query.Where(x => x.Status == status && x.EndDate >= today)
+            };
         }
 
         var schemes = await query
@@ -188,7 +195,14 @@ public sealed class LoyaltySchemeRepository : ILoyaltySchemeRepository
             EndDate = scheme.EndDate,
             SchemeType = scheme.SchemeType,
             BasedOn = scheme.BasedOn,
-            Status = scheme.Status,
+            Status = DisplayStatus(scheme),
+            WorkflowStatus = scheme.Status,
+            BrochurePath = scheme.BrochurePath,
+            SubmittedAt = scheme.SubmittedAt,
+            ApprovedAt = scheme.ApprovedAt,
+            ApprovalRemark = scheme.ApprovalRemark,
+            RejectedAt = scheme.RejectedAt,
+            RejectionRemark = scheme.RejectionRemark,
             CreatedBy = scheme.CreatedBy,
             CreatedByName = scheme.CreatedBy.HasValue && creators.TryGetValue(scheme.CreatedBy.Value, out var creator) ? creator : null,
             CreatedAt = scheme.CreatedAt,
@@ -226,6 +240,18 @@ public sealed class LoyaltySchemeRepository : ILoyaltySchemeRepository
         string.Equals(scope, "All", StringComparison.OrdinalIgnoreCase) || values.Count == 0
             ? "All India"
             : string.Join(", ", values);
+
+    private static string DisplayStatus(LoyaltyScheme scheme)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5.5));
+        if (scheme.EndDate < today)
+        {
+            return "Expired";
+        }
+        if (string.Equals(scheme.Status, "Published", StringComparison.OrdinalIgnoreCase))
+            return today >= scheme.StartDate ? "Live" : "Approved";
+        return scheme.Status;
+    }
 
     private static int? ReadSequence(string code, string prefix)
     {

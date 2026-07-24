@@ -1360,6 +1360,24 @@ namespace Infrastructure.Migrations
                         .HasColumnType("varchar(50)")
                         .HasColumnName("based_on");
 
+                    b.Property<DateTime?>("ApprovedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("approved_at");
+
+                    b.Property<ulong?>("ApprovedBy")
+                        .HasColumnType("bigint unsigned")
+                        .HasColumnName("approved_by");
+
+                    b.Property<string>("ApprovalRemark")
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)")
+                        .HasColumnName("approval_remark");
+
+                    b.Property<string>("BrochurePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("varchar(500)")
+                        .HasColumnName("brochure_path");
+
                     b.Property<DateTime?>("CreatedAt")
                         .HasColumnType("datetime(6)")
                         .HasColumnName("created_at");
@@ -1381,6 +1399,19 @@ namespace Infrastructure.Migrations
                     b.Property<DateOnly>("EndDate")
                         .HasColumnType("date")
                         .HasColumnName("end_date");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("rejected_at");
+
+                    b.Property<ulong?>("RejectedBy")
+                        .HasColumnType("bigint unsigned")
+                        .HasColumnName("rejected_by");
+
+                    b.Property<string>("RejectionRemark")
+                        .HasMaxLength(1000)
+                        .HasColumnType("varchar(1000)")
+                        .HasColumnName("rejection_remark");
 
                     b.Property<string>("SchemeCode")
                         .IsRequired()
@@ -1415,6 +1446,14 @@ namespace Infrastructure.Migrations
                     b.Property<DateOnly>("StartDate")
                         .HasColumnType("date")
                         .HasColumnName("start_date");
+
+                    b.Property<DateTime?>("SubmittedAt")
+                        .HasColumnType("datetime(6)")
+                        .HasColumnName("submitted_at");
+
+                    b.Property<ulong?>("SubmittedBy")
+                        .HasColumnType("bigint unsigned")
+                        .HasColumnName("submitted_by");
 
                     b.Property<string>("Status")
                         .IsRequired()
@@ -1787,6 +1826,10 @@ namespace Infrastructure.Migrations
                         .HasColumnType("varchar(255)")
                         .HasColumnName("invoice_number");
 
+                    b.Property<ulong?>("LoyaltySchemeId")
+                        .HasColumnType("bigint unsigned")
+                        .HasColumnName("loyalty_scheme_id");
+
                     b.Property<decimal>("Points")
                         .ValueGeneratedOnAdd()
                         .HasPrecision(15, 2)
@@ -1818,6 +1861,8 @@ namespace Infrastructure.Migrations
 
                     b.HasIndex("InvoiceNumber")
                         .IsUnique();
+
+                    b.HasIndex("LoyaltySchemeId");
 
                     b.HasIndex("SecondaryCustomerId");
 

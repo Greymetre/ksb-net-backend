@@ -24,6 +24,15 @@ public sealed class LoyaltySchemeConfiguration : IEntityTypeConfiguration<Loyalt
         builder.Property(x => x.SchemeType).HasColumnName("scheme_type").HasMaxLength(50).HasDefaultValue("Invoice");
         builder.Property(x => x.BasedOn).HasColumnName("based_on").HasMaxLength(50);
         builder.Property(x => x.Status).HasColumnName("status").HasMaxLength(50);
+        builder.Property(x => x.BrochurePath).HasColumnName("brochure_path").HasMaxLength(500);
+        builder.Property(x => x.SubmittedAt).HasColumnName("submitted_at");
+        builder.Property(x => x.SubmittedBy).HasColumnName("submitted_by");
+        builder.Property(x => x.ApprovedAt).HasColumnName("approved_at");
+        builder.Property(x => x.ApprovedBy).HasColumnName("approved_by");
+        builder.Property(x => x.ApprovalRemark).HasColumnName("approval_remark").HasMaxLength(1000);
+        builder.Property(x => x.RejectedAt).HasColumnName("rejected_at");
+        builder.Property(x => x.RejectedBy).HasColumnName("rejected_by");
+        builder.Property(x => x.RejectionRemark).HasColumnName("rejection_remark").HasMaxLength(1000);
         builder.Property(x => x.CreatedBy).HasColumnName("created_by");
         builder.Property(x => x.UpdatedBy).HasColumnName("updated_by");
         builder.Property(x => x.CreatedAt).HasColumnName("created_at");

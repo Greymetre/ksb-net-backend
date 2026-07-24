@@ -125,6 +125,24 @@ if (HasFlag(args, "--seed-master-data"))
     return;
 }
 
+// Keep local, existing-development, Docker and Railway databases in sync with
+// the running API. Railway still runs db-bootstrap.sh before deployment; these
+// idempotent startup checks also protect direct starts and older databases.
+if (!IsDisabled(Environment.GetEnvironmentVariable("SKIP_DB_BOOTSTRAP")))
+{
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    dbContext.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
+
+    Console.WriteLine("Checking database migrations...");
+    await dbContext.Database.MigrateAsync();
+
+    Console.WriteLine("Checking master data and permissions...");
+    await MasterDataSeeder.SeedAsync(dbContext);
+    await SuperAdminSeeder.SeedAsync(dbContext);
+    Console.WriteLine("Automatic database bootstrap completed.");
+}
+
 app.UseMiddleware<LaravelExceptionMiddleware>();
 
 if (app.Environment.IsDevelopment())
@@ -147,6 +165,11 @@ static bool HasFlag(string[] args, string flag)
 {
     return args.Any(arg => string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase));
 }
+
+static bool IsDisabled(string? value) =>
+    string.Equals(value, "true", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(value, "1", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(value, "yes", StringComparison.OrdinalIgnoreCase);
 
 static string[] GetCorsOrigins(IConfiguration configuration)
 {

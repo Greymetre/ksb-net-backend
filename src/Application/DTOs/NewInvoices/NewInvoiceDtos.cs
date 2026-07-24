@@ -23,6 +23,7 @@ public sealed class NewInvoiceDto
     public string? SchemeBasedOn { get; set; }
     public decimal? SchemeRewardValue { get; set; }
     public decimal SchemePoints { get; set; }
+    public decimal ExpectedSchemePoints { get; set; }
     public string? TierName { get; set; }
     public string? SchemeHintMessage { get; set; }
     public decimal RegularWalletPoints { get; set; }
@@ -62,6 +63,7 @@ public sealed class NewInvoiceApprovalLogDto
 public sealed class NewInvoiceRequestDto
 {
     public ulong SecondaryCustomerId { get; set; }
+    public ulong? SchemeId { get; set; }
     public string? InvoiceNumber { get; set; }
     public DateTime? InvoiceDate { get; set; }
     public decimal? Amount { get; set; }
@@ -69,8 +71,18 @@ public sealed class NewInvoiceRequestDto
     public string? Attachment { get; set; }
 }
 
+public sealed class InvoiceSchemeOptionDto
+{
+    public ulong Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string Code { get; set; } = string.Empty;
+    public DateOnly StartDate { get; set; }
+    public DateOnly EndDate { get; set; }
+}
+
 public sealed class NewInvoiceFilterDto
 {
+    public ulong? SchemeId { get; set; }
     public string? RetailerSearch { get; set; }
     public string? InvoiceNumber { get; set; }
     public int? ApprovalStatus { get; set; }

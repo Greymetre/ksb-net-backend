@@ -13,10 +13,12 @@ namespace Api.Controllers;
 public sealed class LoyaltySchemesController : ControllerBase
 {
     private readonly ILoyaltySchemeService _loyaltySchemeService;
+    private readonly IWebHostEnvironment _environment;
 
-    public LoyaltySchemesController(ILoyaltySchemeService loyaltySchemeService)
+    public LoyaltySchemesController(ILoyaltySchemeService loyaltySchemeService, IWebHostEnvironment environment)
     {
         _loyaltySchemeService = loyaltySchemeService;
+        _environment = environment;
     }
 
     [RequirePermission("scheme_access_list", "scheme_access")]
@@ -69,6 +71,55 @@ public sealed class LoyaltySchemesController : ControllerBase
     {
         var response = await _loyaltySchemeService.UpdateSchemeAsync(id, request, CurrentUserId(), cancellationToken);
         return Ok(response);
+    }
+
+    [RequirePermission("scheme_submit")]
+    [HttpPost("{id}/submit")]
+    public async Task<IActionResult> SubmitScheme(ulong id, CancellationToken cancellationToken)
+    {
+        return Ok(await _loyaltySchemeService.SubmitSchemeAsync(id, CurrentUserId(), cancellationToken));
+    }
+
+    [RequirePermission("scheme_approve")]
+    [HttpPost("{id}/approve")]
+    public async Task<IActionResult> ApproveScheme(ulong id, [FromBody] LoyaltySchemeDecisionDto request, CancellationToken cancellationToken)
+    {
+        var response = await _loyaltySchemeService.ApproveSchemeAsync(id, request.Remark, CurrentUserId(), cancellationToken);
+        return Ok(response);
+    }
+
+    [RequirePermission("scheme_reject", "scheme_approve")]
+    [HttpPost("{id}/reject")]
+    public async Task<IActionResult> RejectScheme(ulong id, [FromBody] LoyaltySchemeDecisionDto request, CancellationToken cancellationToken)
+    {
+        return Ok(await _loyaltySchemeService.RejectSchemeAsync(id, request.Remark, CurrentUserId(), cancellationToken));
+    }
+
+    [RequirePermission("scheme_publish")]
+    [HttpPost("{id}/publish")]
+    public async Task<IActionResult> PublishScheme(ulong id, CancellationToken cancellationToken)
+    {
+        return Ok(await _loyaltySchemeService.PublishSchemeAsync(id, CurrentUserId(), cancellationToken));
+    }
+
+    [RequirePermission("scheme_create", "scheme_edit")]
+    [HttpPost("{id}/brochure")]
+    [RequestSizeLimit(10 * 1024 * 1024)]
+    public async Task<IActionResult> UploadBrochure(ulong id, IFormFile brochure, CancellationToken cancellationToken)
+    {
+        if (brochure.Length == 0 || brochure.Length > 10 * 1024 * 1024)
+            return BadRequest(new { status = "error", message = "Brochure must be a non-empty PDF up to 10 MB." });
+        if (!string.Equals(Path.GetExtension(brochure.FileName), ".pdf", StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(brochure.ContentType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { status = "error", message = "Only PDF brochure files are allowed." });
+
+        var webRoot = _environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot");
+        var folder = Path.Combine(webRoot, "uploads", "loyalty-schemes");
+        Directory.CreateDirectory(folder);
+        var fileName = $"{Guid.NewGuid():N}.pdf";
+        await using (var stream = System.IO.File.Create(Path.Combine(folder, fileName)))
+            await brochure.CopyToAsync(stream, cancellationToken);
+        return Ok(await _loyaltySchemeService.SetBrochureAsync(id, $"/uploads/loyalty-schemes/{fileName}", CurrentUserId(), cancellationToken));
     }
 
     [RequirePermission("scheme_delete")]

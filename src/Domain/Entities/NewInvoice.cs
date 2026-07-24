@@ -9,6 +9,7 @@ public sealed class NewInvoice : BaseEntity
     public const int StatusRejected = 4;
 
     public ulong SecondaryCustomerId { get; set; }
+    public ulong? LoyaltySchemeId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime InvoiceDate { get; set; }
     public decimal Amount { get; set; }

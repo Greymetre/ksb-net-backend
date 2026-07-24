@@ -28,6 +28,7 @@ public sealed class NewInvoicesController : ControllerBase
         [FromQuery(Name = "retailer_search")] string? retailerSearch,
         [FromQuery(Name = "invoice_number")] string? invoiceNumber,
         [FromQuery(Name = "approval_status")] int? approvalStatus,
+        [FromQuery(Name = "scheme_id")] ulong? schemeId,
         [FromQuery(Name = "branch_id")] ulong? branchId,
         [FromQuery(Name = "from_date")] DateTime? fromDate,
         [FromQuery(Name = "to_date")] DateTime? toDate,
@@ -36,6 +37,7 @@ public sealed class NewInvoicesController : ControllerBase
         filter.RetailerSearch ??= retailerSearch;
         filter.InvoiceNumber ??= invoiceNumber;
         filter.ApprovalStatus ??= approvalStatus;
+        filter.SchemeId ??= schemeId;
         filter.BranchId ??= branchId;
         filter.FromDate ??= fromDate;
         filter.ToDate ??= toDate;
@@ -50,6 +52,7 @@ public sealed class NewInvoicesController : ControllerBase
         [FromQuery(Name = "retailer_search")] string? retailerSearch,
         [FromQuery(Name = "invoice_number")] string? invoiceNumber,
         [FromQuery(Name = "approval_status")] int? approvalStatus,
+        [FromQuery(Name = "scheme_id")] ulong? schemeId,
         [FromQuery(Name = "branch_id")] ulong? branchId,
         [FromQuery(Name = "from_date")] DateTime? fromDate,
         [FromQuery(Name = "to_date")] DateTime? toDate,
@@ -58,6 +61,7 @@ public sealed class NewInvoicesController : ControllerBase
         filter.RetailerSearch ??= retailerSearch;
         filter.InvoiceNumber ??= invoiceNumber;
         filter.ApprovalStatus ??= approvalStatus;
+        filter.SchemeId ??= schemeId;
         filter.BranchId ??= branchId;
         filter.FromDate ??= fromDate;
         filter.ToDate ??= toDate;
@@ -72,6 +76,18 @@ public sealed class NewInvoicesController : ControllerBase
         return Ok(response);
     }
 
+    [HttpGet("schemes")]
+    public async Task<IActionResult> GetSchemes([FromQuery(Name = "customer_id")] ulong customerId, [FromQuery(Name = "invoice_date")] DateTime? invoiceDate, CancellationToken cancellationToken)
+    {
+        return Ok(await _newInvoiceService.GetSchemeOptionsAsync(customerId, invoiceDate, cancellationToken));
+    }
+
+    [HttpGet("filter-schemes")]
+    public async Task<IActionResult> GetSchemeFilters(CancellationToken cancellationToken)
+    {
+        return Ok(await _newInvoiceService.GetSchemeFilterOptionsAsync(cancellationToken));
+    }
+
     [RequirePermission("new_invoice_access")]
     [HttpGet("{id}")]
     public async Task<IActionResult> GetInvoice(ulong id, CancellationToken cancellationToken)
@@ -84,6 +100,10 @@ public sealed class NewInvoicesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> CreateInvoice([FromForm] NewInvoiceFormRequest form, CancellationToken cancellationToken)
     {
+        if (form.AttachmentFile is null || form.AttachmentFile.Length == 0)
+        {
+            return UnprocessableEntity(new { status = "error", message = new { attachment = new[] { "Invoice attachment is required." } } });
+        }
         var request = await ToRequestAsync(form, cancellationToken);
         var response = await _newInvoiceService.CreateInvoiceAsync(request, CurrentUserId(), cancellationToken);
         return StatusCode(StatusCodes.Status201Created, response);
@@ -152,6 +172,7 @@ public sealed class NewInvoicesController : ControllerBase
         return new NewInvoiceRequestDto
         {
             SecondaryCustomerId = form.SecondaryCustomerId,
+            SchemeId = form.SchemeId,
             InvoiceNumber = form.InvoiceNumber,
             InvoiceDate = form.InvoiceDate,
             Amount = form.Amount,
@@ -163,9 +184,14 @@ public sealed class NewInvoicesController : ControllerBase
     private async Task<string?> SaveFileAsync(IFormFile? file, CancellationToken cancellationToken)
     {
         if (file is null || file.Length == 0) return null;
+        var extension = Path.GetExtension(file.FileName).ToLowerInvariant();
+        if (extension is not (".pdf" or ".jpg" or ".jpeg" or ".png" or ".webp")
+            && !file.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new Shared.Exceptions.LaravelHttpException(422, "Only PDF and image invoice attachments are allowed.");
+        }
         var root = Path.Combine(_environment.WebRootPath ?? Path.Combine(_environment.ContentRootPath, "wwwroot"), "uploads", "new-invoices");
         Directory.CreateDirectory(root);
-        var extension = Path.GetExtension(file.FileName);
         var fileName = $"{Guid.NewGuid():N}{extension}";
         var path = Path.Combine(root, fileName);
         await using var stream = System.IO.File.Create(path);
@@ -177,6 +203,7 @@ public sealed class NewInvoicesController : ControllerBase
 public sealed class NewInvoiceFormRequest
 {
     [FromForm(Name = "secondary_customer_id")] public ulong SecondaryCustomerId { get; set; }
+    [FromForm(Name = "scheme_id")] public ulong? SchemeId { get; set; }
     [FromForm(Name = "invoice_number")] public string? InvoiceNumber { get; set; }
     [FromForm(Name = "invoice_date")] public DateTime? InvoiceDate { get; set; }
     [FromForm(Name = "amount")] public decimal? Amount { get; set; }

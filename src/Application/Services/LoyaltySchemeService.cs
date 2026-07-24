@@ -16,7 +16,6 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
     private static readonly string[] CustomerTypes = ["Retailer", "Influencers", "Plumber", "Retailer + Plumber", "Sub-Dealer", "Distributor"];
     private static readonly string[] AreaScopes = ["All", "Branch", "Zone", "State", "Customer"];
     private static readonly string[] BasedOnOptions = ["Value", "Percentage"];
-    private static readonly string[] StatusOptions = ["Draft", "Live", "Ended"];
     private readonly ILoyaltySchemeRepository _repository;
 
     public LoyaltySchemeService(ILoyaltySchemeRepository repository)
@@ -77,7 +76,7 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
             EndDate = request.EndDate!.Value,
             SchemeType = "Invoice",
             BasedOn = NormalizeChoice(request.BasedOn, "Value", BasedOnOptions),
-            Status = NormalizeChoice(request.Status, "Draft", StatusOptions),
+            Status = "Draft",
             CreatedBy = actorUserId,
             UpdatedBy = actorUserId,
             CreatedAt = now,
@@ -93,6 +92,8 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
     {
         if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
         var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (scheme.Status is not ("Draft" or "Rejected"))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only draft or rejected schemes can be edited.");
         await ValidateRequestAsync(request, id, true, cancellationToken);
 
         var now = DateTime.UtcNow;
@@ -107,7 +108,8 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         scheme.EndDate = request.EndDate!.Value;
         scheme.SchemeType = "Invoice";
         scheme.BasedOn = NormalizeChoice(request.BasedOn, "Value", BasedOnOptions);
-        scheme.Status = NormalizeChoice(request.Status, "Draft", StatusOptions);
+        // Approval is a separate permission-gated action. Editing must never
+        // publish or demote a scheme through a client-supplied status.
         scheme.UpdatedBy = actorUserId;
         scheme.UpdatedAt = now;
         scheme.Slabs.Clear();
@@ -120,9 +122,95 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         return LaravelApiResponse.Success("scheme", updated, "Scheme updated successfully");
     }
 
+    public async Task<LaravelApiResponse> ApproveSchemeAsync(ulong id, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (!string.Equals(scheme.Status, "Pending Approval", StringComparison.OrdinalIgnoreCase))
+        {
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only schemes pending approval can be approved.");
+        }
+        if (scheme.EndDate < IndiaToday())
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "An expired scheme cannot be approved.");
+
+        scheme.Status = "Approved";
+        scheme.ApprovedAt = DateTime.UtcNow;
+        scheme.ApprovedBy = actorUserId;
+        scheme.ApprovalRemark = NormalizeText(remark);
+        scheme.UpdatedBy = actorUserId;
+        scheme.UpdatedAt = DateTime.UtcNow;
+        var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
+        return LaravelApiResponse.Success("scheme", updated, "Scheme approved successfully");
+    }
+
+    public async Task<LaravelApiResponse> SubmitSchemeAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (scheme.Status is not ("Draft" or "Rejected"))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only draft or rejected schemes can be submitted.");
+        if (scheme.EndDate < IndiaToday())
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "An expired scheme cannot be submitted.");
+
+        scheme.Status = "Pending Approval";
+        scheme.SubmittedAt = DateTime.UtcNow;
+        scheme.SubmittedBy = actorUserId;
+        scheme.RejectedAt = null;
+        scheme.RejectedBy = null;
+        scheme.RejectionRemark = null;
+        scheme.UpdatedBy = actorUserId;
+        var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
+        return LaravelApiResponse.Success("scheme", updated, "Scheme submitted for approval");
+    }
+
+    public async Task<LaravelApiResponse> RejectSchemeAsync(ulong id, string? remark, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        if (string.IsNullOrWhiteSpace(remark))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Rejection remark is required.");
+        var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (!string.Equals(scheme.Status, "Pending Approval", StringComparison.OrdinalIgnoreCase))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only schemes pending approval can be rejected.");
+
+        scheme.Status = "Rejected";
+        scheme.RejectedAt = DateTime.UtcNow;
+        scheme.RejectedBy = actorUserId;
+        scheme.RejectionRemark = remark.Trim();
+        scheme.UpdatedBy = actorUserId;
+        var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
+        return LaravelApiResponse.Success("scheme", updated, "Scheme rejected");
+    }
+
+    public async Task<LaravelApiResponse> PublishSchemeAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (!string.Equals(scheme.Status, "Approved", StringComparison.OrdinalIgnoreCase))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only approved schemes can be published.");
+        if (scheme.EndDate < IndiaToday())
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "An expired scheme cannot be published.");
+
+        scheme.Status = "Published";
+        scheme.UpdatedBy = actorUserId;
+        var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
+        return LaravelApiResponse.Success("scheme", updated, "Scheme published successfully");
+    }
+
+    public async Task<LaravelApiResponse> SetBrochureAsync(ulong id, string brochurePath, ulong? actorUserId, CancellationToken cancellationToken)
+    {
+        if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
+        var scheme = await FindOrThrowAsync(id, cancellationToken);
+        scheme.BrochurePath = brochurePath;
+        scheme.UpdatedBy = actorUserId;
+        var updated = await _repository.SaveSchemeAsync(scheme, cancellationToken);
+        return LaravelApiResponse.Success("scheme", updated, "Scheme brochure uploaded successfully");
+    }
+
     public async Task<LaravelApiResponse> DeleteSchemeAsync(ulong id, CancellationToken cancellationToken)
     {
         var scheme = await FindOrThrowAsync(id, cancellationToken);
+        if (scheme.Status is not ("Draft" or "Rejected"))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, "Only draft or rejected schemes can be deleted.");
         await _repository.DeleteSchemeAsync(scheme, cancellationToken);
         return LaravelApiResponse.MessageOnly("success", "Scheme deleted successfully");
     }
@@ -140,8 +228,6 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         AddChoiceError(errors, "customer_type", request.CustomerType, string.Empty, CustomerTypes, "Invalid customer type.");
         AddChoiceError(errors, "area_scope", request.AreaScope, "All", AreaScopes, "Invalid area scope.");
         AddChoiceError(errors, "based_on", request.BasedOn, "Value", BasedOnOptions, "Invalid based on value.");
-        AddChoiceError(errors, "status", request.Status, "Draft", StatusOptions, "Invalid status.");
-
         if (!string.IsNullOrWhiteSpace(request.SchemeType) && !string.Equals(request.SchemeType.Trim(), "Invoice", StringComparison.OrdinalIgnoreCase))
         {
             errors["scheme_type"] = ["Only Invoice scheme type is currently supported."];
@@ -159,6 +245,7 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         }
         else
         {
+            decimal? previousTo = null;
             for (var index = 0; index < request.Slabs.Count; index++)
             {
                 var slab = request.Slabs[index];
@@ -167,6 +254,23 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
                 if (!slab.ValueFrom.HasValue || slab.ValueFrom.Value < 0) errors[$"{prefix}.value_from"] = ["Value from is required and cannot be negative."];
                 if (slab.ValueTo.HasValue && slab.ValueFrom.HasValue && slab.ValueTo.Value < slab.ValueFrom.Value) errors[$"{prefix}.value_to"] = ["Value to must be greater than or equal to value from."];
                 if (!slab.RewardValue.HasValue || slab.RewardValue.Value < 0) errors[$"{prefix}.reward_value"] = ["Reward value is required and cannot be negative."];
+                if (string.Equals(request.BasedOn, "Percentage", StringComparison.OrdinalIgnoreCase)
+                    && slab.RewardValue.HasValue
+                    && slab.RewardValue.Value > 100)
+                {
+                    errors[$"{prefix}.reward_value"] = ["Reward percentage cannot be greater than 100."];
+                }
+                if (!string.Equals(request.BasedOn, "Percentage", StringComparison.OrdinalIgnoreCase)
+                    && slab.RewardValue.HasValue
+                    && slab.RewardValue.Value > 10000000)
+                {
+                    errors[$"{prefix}.reward_value"] = ["Reward amount cannot be greater than 1,00,00,000."];
+                }
+                if (index > 0 && previousTo is null)
+                    errors[$"{prefix}.value_from"] = ["The previous slab must have a value to before another slab is added."];
+                else if (index > 0 && slab.ValueFrom.HasValue && slab.ValueFrom.Value != previousTo!.Value + 1)
+                    errors[$"{prefix}.value_from"] = [$"Value from must be {previousTo.Value + 1} to avoid overlaps or gaps."];
+                previousTo = slab.ValueTo;
             }
         }
 
@@ -277,4 +381,5 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static LaravelHttpException Http(int statusCode, object message) => new(statusCode, message);
+    private static DateOnly IndiaToday() => DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5.5));
 }

@@ -71,6 +71,15 @@ public sealed class NewInvoiceService : INewInvoiceService
     public async Task<LaravelApiResponse> GetRetailersAsync(string? search, ulong? actorUserId, CancellationToken cancellationToken) =>
         LaravelApiResponse.Success("retailers", await _repository.GetRetailerOptionsAsync(search, actorUserId, cancellationToken));
 
+    public async Task<LaravelApiResponse> GetSchemeOptionsAsync(ulong customerId, DateTime? invoiceDate, CancellationToken cancellationToken)
+    {
+        if (customerId == 0 || !invoiceDate.HasValue) return LaravelApiResponse.Success("schemes", Array.Empty<InvoiceSchemeOptionDto>());
+        return LaravelApiResponse.Success("schemes", await _repository.GetEligibleSchemeOptionsAsync(customerId, invoiceDate.Value, cancellationToken));
+    }
+
+    public async Task<LaravelApiResponse> GetSchemeFilterOptionsAsync(CancellationToken cancellationToken) =>
+        LaravelApiResponse.Success("schemes", await _repository.GetInvoiceSchemeFilterOptionsAsync(cancellationToken));
+
     public async Task<LaravelApiResponse> CreateInvoiceAsync(NewInvoiceRequestDto request, ulong? actorUserId, CancellationToken cancellationToken)
     {
         if (!actorUserId.HasValue) throw Http(LaravelStatusCodes.Unauthorized, "Unauthenticated.");
@@ -80,6 +89,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         var invoice = new NewInvoice
         {
             SecondaryCustomerId = request.SecondaryCustomerId,
+            LoyaltySchemeId = request.SchemeId,
             InvoiceNumber = request.InvoiceNumber!.Trim(),
             InvoiceDate = request.InvoiceDate!.Value.Date,
             Amount = request.Amount!.Value,
@@ -114,6 +124,7 @@ public sealed class NewInvoiceService : INewInvoiceService
         await ValidateRequestAsync(request, id, actorUserId, cancellationToken);
 
         invoice.SecondaryCustomerId = request.SecondaryCustomerId;
+        invoice.LoyaltySchemeId = request.SchemeId;
         invoice.InvoiceNumber = request.InvoiceNumber!.Trim();
         invoice.InvoiceDate = request.InvoiceDate!.Value.Date;
         invoice.Amount = request.Amount!.Value;
@@ -205,10 +216,12 @@ public sealed class NewInvoiceService : INewInvoiceService
     {
         var errors = new Dictionary<string, string[]>();
         if (request.SecondaryCustomerId == 0) errors["secondary_customer_id"] = ["Customer is required."];
+        if (!request.SchemeId.HasValue || request.SchemeId.Value == 0) errors["scheme_id"] = ["Scheme selection is required."];
         if (string.IsNullOrWhiteSpace(request.InvoiceNumber)) errors["invoice_number"] = ["Invoice number is required."];
         if (!request.InvoiceDate.HasValue) errors["invoice_date"] = ["Invoice date is required."];
         if (!request.Amount.HasValue || request.Amount.Value <= 0) errors["amount"] = ["Amount must be greater than 0."];
         if (request.Points.HasValue && request.Points.Value < 0) errors["points"] = ["Points cannot be negative."];
+        if (string.IsNullOrWhiteSpace(request.Attachment)) errors["attachment"] = ["Invoice attachment is required."];
 
         if (errors.Count > 0) throw Http(LaravelStatusCodes.NoContentLikeValidation, errors);
 
@@ -219,6 +232,10 @@ public sealed class NewInvoiceService : INewInvoiceService
         {
             throw Http(LaravelStatusCodes.NoContentLikeValidation, new { invoice_number = new[] { "This invoice number already exists." } });
         }
+
+        var eligibleSchemes = await _repository.GetEligibleSchemeOptionsAsync(request.SecondaryCustomerId, request.InvoiceDate!.Value, cancellationToken);
+        if (!eligibleSchemes.Any(x => x.Id == request.SchemeId!.Value))
+            throw Http(LaravelStatusCodes.NoContentLikeValidation, new { scheme_id = new[] { "The selected scheme is not active for the invoice date or has expired." } });
     }
 
     private async Task<NewInvoiceDto> GetOrThrowAsync(ulong id, ulong? actorUserId, CancellationToken cancellationToken) =>

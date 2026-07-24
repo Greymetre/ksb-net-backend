@@ -15,6 +15,15 @@ public sealed class LoyaltyScheme : BaseEntity
     public string SchemeType { get; set; } = "Invoice";
     public string BasedOn { get; set; } = "Value";
     public string Status { get; set; } = "Draft";
+    public string? BrochurePath { get; set; }
+    public DateTime? SubmittedAt { get; set; }
+    public ulong? SubmittedBy { get; set; }
+    public DateTime? ApprovedAt { get; set; }
+    public ulong? ApprovedBy { get; set; }
+    public string? ApprovalRemark { get; set; }
+    public DateTime? RejectedAt { get; set; }
+    public ulong? RejectedBy { get; set; }
+    public string? RejectionRemark { get; set; }
     public ulong? CreatedBy { get; set; }
     public ulong? UpdatedBy { get; set; }
     public ICollection<LoyaltySchemeSlab> Slabs { get; set; } = [];

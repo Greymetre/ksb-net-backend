@@ -665,7 +665,7 @@ INNER JOIN (
                 .Include(x => x.Slabs)
                 .Where(x => x.DeletedAt == null
                     && x.Active == "Y"
-                    && x.Status == "Live"
+                    && (x.Status == "Published" || x.Status == "Live")
                     && x.SchemeType == "Invoice"
                     && x.StartDate <= maxDate
                     && x.EndDate >= minDate)

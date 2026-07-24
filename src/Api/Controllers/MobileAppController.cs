@@ -283,7 +283,7 @@ public sealed class MobileAppController : ControllerBase
         var invoices = await CustomerInvoices(customer.Id, cancellationToken);
         var wallet = await BuildWallet(customer.Id, invoices, cancellationToken);
         var walletCards = await BuildDashboardWalletCards(customer, wallet, invoices, cancellationToken);
-        var currentSchemes = await CurrentRunningSchemes(null, cancellationToken);
+        var currentSchemes = await CurrentRunningSchemes(null, cancellationToken, invoices);
         var pendingInvoices = invoices.Count(x => x.ApprovalStatus != NewInvoice.StatusApprovedHo && x.ApprovalStatus != NewInvoice.StatusRejected);
 
         return Ok(new
@@ -355,6 +355,28 @@ public sealed class MobileAppController : ControllerBase
             items,
             data,
             pagination = new { page, page_size = pageSize, total }
+        });
+    }
+
+    [Authorize]
+    [HttpGet("invoices/{id:long}")]
+    public async Task<IActionResult> InvoiceDetails(ulong id, CancellationToken cancellationToken)
+    {
+        var customer = await CurrentCustomer(cancellationToken);
+        if (customer is null) return Unauthorized(new { status = "error", message = "Unauthenticated." });
+
+        var invoice = await _invoiceRepository.GetInvoiceAsync(id, null, cancellationToken);
+        if (invoice is null || invoice.SecondaryCustomerId != customer.Id)
+            return NotFound(new { status = "error", message = "Invoice not found." });
+
+        return Ok(new
+        {
+            status = "success",
+            data = invoice,
+            status_key = InvoiceStatusKey(invoice.ApprovalStatus),
+            is_pending = InvoiceStatusKey(invoice.ApprovalStatus) == "pending",
+            is_approved = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo,
+            is_rejected = invoice.ApprovalStatus == NewInvoice.StatusRejected
         });
     }
 
@@ -593,6 +615,9 @@ public sealed class MobileAppController : ControllerBase
             {
                 var invoice = group.OrderByDescending(x => x.SchemePoints).First();
                 var rewardAmount = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo ? group.Sum(x => x.SchemePoints) : 0;
+                var expectedRewardAmount = invoice.ApprovalStatus == NewInvoice.StatusApprovedHo
+                    ? rewardAmount
+                    : group.Sum(x => x.ExpectedSchemePoints);
                 var displayDate = invoice.InvoiceDate;
                 var statusKey = InvoiceStatusKey(invoice.ApprovalStatus);
                 return new MobileInvoiceListItemDto
@@ -608,11 +633,19 @@ public sealed class MobileAppController : ControllerBase
                     AmountDisplay = FormatIndianCurrency(invoice.Amount),
                     RewardAmount = rewardAmount,
                     RewardDisplay = rewardAmount > 0 ? $"+{FormatIndianCurrency(rewardAmount)}" : null,
-                    RewardLabel = rewardAmount > 0 ? "Reward" : "Awaiting approval",
+                    ExpectedRewardAmount = expectedRewardAmount,
+                    ExpectedRewardDisplay = expectedRewardAmount > 0 ? $"+{FormatIndianCurrency(expectedRewardAmount)}" : null,
+                    RewardLabel = rewardAmount > 0
+                        ? "Reward credited"
+                        : statusKey == "pending"
+                            ? "Awaiting Approval"
+                            : statusKey == "approved"
+                                ? "No reward earned"
+                                : "Reward",
                     Status = statusKey,
                     StatusLabel = invoice.ApprovalStatusLabel,
                     IsRewardCredited = rewardAmount > 0,
-                    IsPending = invoice.ApprovalStatus == NewInvoice.StatusPending,
+                    IsPending = statusKey == "pending",
                     Attachment = invoice.Attachment,
                     SchemeName = invoice.SchemeName,
                     SchemeNames = group.Where(x => !string.IsNullOrWhiteSpace(x.SchemeName)).Select(x => x.SchemeName!).Distinct().ToArray()
@@ -770,7 +803,7 @@ public sealed class MobileAppController : ControllerBase
             .Include(x => x.Slabs)
             .Where(x => x.DeletedAt == null
                 && x.Active == "Y"
-                && x.Status == "Live"
+                && (x.Status == "Published" || x.Status == "Live")
                 && x.SchemeType == "Invoice"
                 && x.StartDate <= today
                 && x.EndDate >= today)
@@ -936,13 +969,16 @@ public sealed class MobileAppController : ControllerBase
     private async Task<IReadOnlyCollection<CurrentSchemeDto>> LiveSchemes(string? walletType, CancellationToken cancellationToken) =>
         await CurrentRunningSchemes(walletType, cancellationToken);
 
-    private async Task<IReadOnlyCollection<CurrentSchemeDto>> CurrentRunningSchemes(string? walletType, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<CurrentSchemeDto>> CurrentRunningSchemes(
+        string? walletType,
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<NewInvoiceDto>? customerInvoices = null)
     {
         var today = CurrentBusinessDate();
         var query = _dbContext.LoyaltySchemes.AsNoTracking().Include(x => x.Slabs)
             .Where(x => x.DeletedAt == null
                 && x.Active == "Y"
-                && x.Status == "Live"
+                && (x.Status == "Published" || x.Status == "Live")
                 && x.SchemeType == "Invoice"
                 && x.StartDate <= today
                 && x.EndDate >= today);
@@ -950,8 +986,25 @@ public sealed class MobileAppController : ControllerBase
         if (walletType == "Regular") query = query.Where(x => x.SchemeTag != "Booster");
 
         var schemes = await query.OrderBy(x => x.SchemeTag).ThenBy(x => x.SchemeName).ToListAsync(cancellationToken);
-        return schemes.Select(scheme => new CurrentSchemeDto
+        return schemes.Select(scheme =>
         {
+            var schemeInvoices = customerInvoices?
+                .Where(invoice => invoice.SchemeId == scheme.Id)
+                .GroupBy(invoice => invoice.Id)
+                .Select(group => group.First())
+                .ToList() ?? [];
+            var achievementValue = schemeInvoices
+                .Where(invoice => invoice.ApprovalStatus == NewInvoice.StatusApprovedHo)
+                .Sum(invoice => invoice.Amount);
+            var pendingInvoices = schemeInvoices
+                .Where(invoice => invoice.ApprovalStatus != NewInvoice.StatusApprovedHo
+                    && invoice.ApprovalStatus != NewInvoice.StatusRejected)
+                .ToList();
+            var orderedSlabs = scheme.Slabs.OrderBy(slab => slab.ValueFrom).ThenBy(slab => slab.SortOrder).ToList();
+            var currentSlab = orderedSlabs.LastOrDefault(slab => achievementValue >= slab.ValueFrom);
+            var nextSlab = orderedSlabs.FirstOrDefault(slab => slab.ValueFrom > achievementValue);
+            return new CurrentSchemeDto
+            {
             Id = scheme.Id,
             SchemeName = scheme.SchemeName,
             SchemeCode = scheme.SchemeCode,
@@ -965,10 +1018,15 @@ public sealed class MobileAppController : ControllerBase
             EndDate = scheme.EndDate,
             BasedOn = scheme.BasedOn,
             Status = scheme.Status,
+            BrochurePath = scheme.BrochurePath,
             DaysLeft = Math.Max(0, (scheme.EndDate.ToDateTime(TimeOnly.MinValue).Date - DateTime.UtcNow.AddHours(5.5).Date).Days),
-            Tiers = scheme.Slabs
-                .OrderBy(slab => slab.ValueFrom)
-                .ThenBy(slab => slab.SortOrder)
+            AchievementValue = achievementValue,
+            PendingInvoiceValue = pendingInvoices.Sum(invoice => invoice.Amount),
+            ExpectedPendingReward = pendingInvoices.Sum(invoice => invoice.ExpectedSchemePoints),
+            CurrentSlab = currentSlab?.TierName,
+            NextSlab = nextSlab?.TierName,
+            AdditionalValueRequired = nextSlab is null ? 0 : Math.Max(0, nextSlab.ValueFrom - achievementValue),
+            Tiers = orderedSlabs
                 .Select(slab => new CurrentSchemeTierDto
                 {
                     Id = slab.Id,
@@ -980,6 +1038,7 @@ public sealed class MobileAppController : ControllerBase
                     SortOrder = slab.SortOrder
                 })
                 .ToList()
+            };
         }).ToList();
     }
 
@@ -1699,6 +1758,8 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
         public string AmountDisplay { get; set; } = string.Empty;
         public decimal RewardAmount { get; set; }
         public string? RewardDisplay { get; set; }
+        public decimal ExpectedRewardAmount { get; set; }
+        public string? ExpectedRewardDisplay { get; set; }
         public string RewardLabel { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
         public string StatusLabel { get; set; } = string.Empty;
@@ -1819,7 +1880,14 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
         public DateOnly EndDate { get; set; }
         public string BasedOn { get; set; } = string.Empty;
         public string Status { get; set; } = string.Empty;
+        public string? BrochurePath { get; set; }
         public int DaysLeft { get; set; }
+        public decimal AchievementValue { get; set; }
+        public decimal PendingInvoiceValue { get; set; }
+        public decimal ExpectedPendingReward { get; set; }
+        public string? CurrentSlab { get; set; }
+        public string? NextSlab { get; set; }
+        public decimal AdditionalValueRequired { get; set; }
         public IReadOnlyCollection<CurrentSchemeTierDto> Tiers { get; set; } = [];
     }
 

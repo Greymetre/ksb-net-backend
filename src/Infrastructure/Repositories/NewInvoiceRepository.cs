@@ -99,6 +99,46 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         return await query.FirstOrDefaultAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyCollection<InvoiceSchemeOptionDto>> GetEligibleSchemeOptionsAsync(ulong customerId, DateTime invoiceDate, CancellationToken cancellationToken)
+    {
+        var date = DateOnly.FromDateTime(invoiceDate.Date);
+        var today = DateOnly.FromDateTime(DateTime.UtcNow.AddHours(5.5));
+        var customer = await _dbContext.Customers.AsNoTracking().FirstOrDefaultAsync(x => x.Id == customerId && x.Active == "Y", cancellationToken);
+        if (customer is null) return [];
+
+        var schemes = await _dbContext.LoyaltySchemes.AsNoTracking()
+            .Where(x => x.DeletedAt == null
+                && x.Active == "Y"
+                && (x.Status == "Published" || x.Status == "Live")
+                && x.SchemeType == "Invoice"
+                && x.StartDate <= today
+                && x.EndDate >= today
+                && x.StartDate <= date
+                && x.EndDate >= date)
+            .OrderBy(x => x.SchemeName)
+            .ToListAsync(cancellationToken);
+
+        return schemes
+            .Where(x => CustomerTypeMatches(x.CustomerType))
+            .Select(x => new InvoiceSchemeOptionDto { Id = x.Id, Name = x.SchemeName, Code = x.SchemeCode, StartDate = x.StartDate, EndDate = x.EndDate })
+            .ToList();
+    }
+
+    public async Task<IReadOnlyCollection<InvoiceSchemeOptionDto>> GetInvoiceSchemeFilterOptionsAsync(CancellationToken cancellationToken) =>
+        await _dbContext.LoyaltySchemes.AsNoTracking()
+            .Where(scheme => scheme.DeletedAt == null
+                && _dbContext.NewInvoices.Any(invoice => invoice.LoyaltySchemeId == scheme.Id))
+            .OrderBy(scheme => scheme.SchemeName)
+            .Select(scheme => new InvoiceSchemeOptionDto
+            {
+                Id = scheme.Id,
+                Name = scheme.SchemeName,
+                Code = scheme.SchemeCode,
+                StartDate = scheme.StartDate,
+                EndDate = scheme.EndDate
+            })
+            .ToListAsync(cancellationToken);
+
     public async Task<bool> InvoiceNumberExistsAsync(string invoiceNumber, ulong? exceptId, CancellationToken cancellationToken) =>
         await _dbContext.NewInvoices.AnyAsync(x => x.InvoiceNumber == invoiceNumber && (!exceptId.HasValue || x.Id != exceptId), cancellationToken);
 
@@ -143,6 +183,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
 
     private IQueryable<InvoiceRow> ApplyFilters(IQueryable<InvoiceRow> query, NewInvoiceFilterDto filter)
     {
+        if (filter.SchemeId.HasValue) query = query.Where(x => x.Invoice.LoyaltySchemeId == filter.SchemeId.Value);
         if (!string.IsNullOrWhiteSpace(filter.RetailerSearch))
         {
             var search = filter.RetailerSearch.Trim();
@@ -420,7 +461,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             .Include(x => x.Slabs)
             .Where(x => x.DeletedAt == null
                 && x.Active == "Y"
-                && x.Status == "Live"
+                && (x.Status == "Published" || x.Status == "Live")
                 && x.SchemeType == "Invoice"
                 && x.StartDate <= maxDate
                 && x.EndDate >= minDate)
@@ -441,7 +482,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
                 && x.ApprovalStatus == NewInvoice.StatusApprovedHo
                 && x.InvoiceDate >= minDate
                 && x.InvoiceDate <= maxDate)
-            .Select(x => new SchemeInvoiceAmount(x.Id, x.SecondaryCustomerId, x.InvoiceDate, x.Amount))
+            .Select(x => new SchemeInvoiceAmount(x.Id, x.SecondaryCustomerId, x.LoyaltySchemeId, x.InvoiceDate, x.Amount))
             .ToListAsync(cancellationToken);
     }
 
@@ -451,18 +492,14 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
     private static IReadOnlyCollection<NewInvoiceDto> ToSchemeDtos(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, IReadOnlyCollection<LoyaltyScheme> schemes, IReadOnlyCollection<SchemeInvoiceAmount> schemeInvoices, ApprovalStageSummary approvalSummary)
     {
         var invoiceDate = DateOnly.FromDateTime(invoice.InvoiceDate.Date);
-        var matchingSchemes = schemes
-            .Where(scheme => SchemeMatches(scheme, invoiceDate, customer, branch, zoneName))
-            .OrderBy(scheme => scheme.SchemeTag)
-            .ThenBy(scheme => scheme.SchemeName)
-            .ToList();
+        var selectedScheme = invoice.LoyaltySchemeId.HasValue
+            ? schemes.FirstOrDefault(scheme => scheme.Id == invoice.LoyaltySchemeId.Value)
+            : null;
+        if (selectedScheme is null)
+            return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null, approvalSummary)];
 
-        if (matchingSchemes.Count == 0) return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, null, null, approvalSummary)];
-        return matchingSchemes.Select(scheme =>
-        {
-            var periodAmount = PeriodAmount(invoice, scheme, schemeInvoices);
-            return ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, scheme, CalculateSchemeResult(invoice.Amount, periodAmount, scheme), approvalSummary);
-        }).ToList();
+        var periodAmount = PeriodAmount(invoice, selectedScheme, schemeInvoices);
+        return [ToDto(invoice, customer, cityName, zoneName, assignedDistributorName, assignedEmployeeName, creator, branch, selectedScheme, CalculateSchemeResult(invoice.Amount, periodAmount, selectedScheme), approvalSummary)];
     }
 
     private static NewInvoiceDto ToDto(NewInvoice invoice, Customer customer, string? cityName, string? zoneName, string? assignedDistributorName, string? assignedEmployeeName, User? creator, Branch? branch, LoyaltyScheme? scheme, SchemeResult? schemeResult, ApprovalStageSummary approvalSummary)
@@ -493,6 +530,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
             SchemeBasedOn = scheme?.BasedOn,
             SchemeRewardValue = schemeResult?.RewardValue,
             SchemePoints = schemePoints,
+            ExpectedSchemePoints = schemeResult?.Points ?? 0,
             TierName = schemeResult?.TierName,
             SchemeHintMessage = schemeResult?.HintMessage,
             RegularWalletPoints = scheme is not null && !isBooster ? schemePoints : 0,
@@ -546,6 +584,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         var endDate = scheme.EndDate.ToDateTime(TimeOnly.MaxValue);
         return schemeInvoices
             .Where(x => x.CustomerId == invoice.SecondaryCustomerId
+                && x.SchemeId == scheme.Id
                 && x.InvoiceDate >= startDate
                 && x.InvoiceDate <= endDate)
             .Sum(x => x.Amount);
@@ -679,7 +718,7 @@ public sealed class NewInvoiceRepository : INewInvoiceRepository
         public Branch? Branch { get; init; }
     }
 
-    private sealed record SchemeInvoiceAmount(ulong InvoiceId, ulong CustomerId, DateTime InvoiceDate, decimal Amount);
+    private sealed record SchemeInvoiceAmount(ulong InvoiceId, ulong CustomerId, ulong? SchemeId, DateTime InvoiceDate, decimal Amount);
 
     private sealed record SchemeResult(decimal Points, decimal? RewardValue, string? TierName, string? HintMessage);
 
