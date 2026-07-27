@@ -195,6 +195,7 @@ public sealed class LoyaltySchemeRepository : ILoyaltySchemeRepository
             EndDate = scheme.EndDate,
             SchemeType = scheme.SchemeType,
             BasedOn = scheme.BasedOn,
+            RedemptionEnabled = scheme.RedemptionEnabled,
             Status = DisplayStatus(scheme),
             WorkflowStatus = scheme.Status,
             BrochurePath = scheme.BrochurePath,

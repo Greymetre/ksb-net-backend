@@ -23,6 +23,7 @@ public sealed class LoyaltySchemeConfiguration : IEntityTypeConfiguration<Loyalt
         builder.Property(x => x.EndDate).HasColumnName("end_date").HasColumnType("date");
         builder.Property(x => x.SchemeType).HasColumnName("scheme_type").HasMaxLength(50).HasDefaultValue("Invoice");
         builder.Property(x => x.BasedOn).HasColumnName("based_on").HasMaxLength(50);
+        builder.Property(x => x.RedemptionEnabled).HasColumnName("redemption_enabled").HasDefaultValue(false);
         builder.Property(x => x.Status).HasColumnName("status").HasMaxLength(50);
         builder.Property(x => x.BrochurePath).HasColumnName("brochure_path").HasMaxLength(500);
         builder.Property(x => x.SubmittedAt).HasColumnName("submitted_at");

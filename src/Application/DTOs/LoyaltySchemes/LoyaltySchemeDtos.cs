@@ -16,6 +16,7 @@ public sealed class LoyaltySchemeDto
     public DateOnly EndDate { get; set; }
     public string SchemeType { get; set; } = "Invoice";
     public string BasedOn { get; set; } = "Value";
+    public bool RedemptionEnabled { get; set; }
     public string Status { get; set; } = "Draft";
     public string WorkflowStatus { get; set; } = "Draft";
     public string? BrochurePath { get; set; }
@@ -54,6 +55,7 @@ public sealed class LoyaltySchemeRequestDto
     public DateOnly? EndDate { get; set; }
     public string? SchemeType { get; set; }
     public string? BasedOn { get; set; }
+    public bool RedemptionEnabled { get; set; }
     public string? Status { get; set; }
     public List<LoyaltySchemeSlabRequestDto> Slabs { get; set; } = [];
 }

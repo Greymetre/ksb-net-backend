@@ -76,6 +76,7 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
             EndDate = request.EndDate!.Value,
             SchemeType = "Invoice",
             BasedOn = NormalizeChoice(request.BasedOn, "Value", BasedOnOptions),
+            RedemptionEnabled = request.RedemptionEnabled,
             Status = "Draft",
             CreatedBy = actorUserId,
             UpdatedBy = actorUserId,
@@ -108,6 +109,7 @@ public sealed class LoyaltySchemeService : ILoyaltySchemeService
         scheme.EndDate = request.EndDate!.Value;
         scheme.SchemeType = "Invoice";
         scheme.BasedOn = NormalizeChoice(request.BasedOn, "Value", BasedOnOptions);
+        scheme.RedemptionEnabled = request.RedemptionEnabled;
         // Approval is a separate permission-gated action. Editing must never
         // publish or demote a scheme through a client-supplied status.
         scheme.UpdatedBy = actorUserId;

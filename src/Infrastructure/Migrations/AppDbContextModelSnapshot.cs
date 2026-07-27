@@ -1413,6 +1413,12 @@ namespace Infrastructure.Migrations
                         .HasColumnType("varchar(1000)")
                         .HasColumnName("rejection_remark");
 
+                    b.Property<bool>("RedemptionEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("tinyint(1)")
+                        .HasDefaultValue(false)
+                        .HasColumnName("redemption_enabled");
+
                     b.Property<string>("SchemeCode")
                         .IsRequired()
                         .HasMaxLength(100)

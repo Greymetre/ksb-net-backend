@@ -102,6 +102,10 @@ if (HasFlag(args, "--migrate"))
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
+    var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync()).ToArray();
+    Console.WriteLine(pendingMigrations.Length == 0
+        ? "No pending database migrations."
+        : $"Applying database migrations: {string.Join(", ", pendingMigrations)}");
     await dbContext.Database.MigrateAsync();
     Console.WriteLine("Database migration completed.");
     return;
@@ -135,6 +139,10 @@ if (!IsDisabled(Environment.GetEnvironmentVariable("SKIP_DB_BOOTSTRAP")))
     dbContext.Database.SetCommandTimeout(TimeSpan.FromMinutes(10));
 
     Console.WriteLine("Checking database migrations...");
+    var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync()).ToArray();
+    Console.WriteLine(pendingMigrations.Length == 0
+        ? "No pending database migrations."
+        : $"Applying database migrations: {string.Join(", ", pendingMigrations)}");
     await dbContext.Database.MigrateAsync();
 
     Console.WriteLine("Checking master data and permissions...");

@@ -14,6 +14,7 @@ public sealed class LoyaltyScheme : BaseEntity
     public DateOnly EndDate { get; set; }
     public string SchemeType { get; set; } = "Invoice";
     public string BasedOn { get; set; } = "Value";
+    public bool RedemptionEnabled { get; set; }
     public string Status { get; set; } = "Draft";
     public string? BrochurePath { get; set; }
     public DateTime? SubmittedAt { get; set; }

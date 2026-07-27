@@ -404,10 +404,11 @@ public sealed class MobileAppController : ControllerBase
             {
                 loyalty_scheme_id = scheme.SchemeId,
                 scheme_name = scheme.SchemeName,
+                redemption_enabled = scheme.RedemptionEnabled,
                 wallet_type = selected.WalletType,
                 available_points = scheme.AvailablePoints,
                 requested_points = points,
-                eligible = points > 0 && points <= scheme.AvailablePoints,
+                eligible = scheme.RedemptionEnabled && points > 0 && points <= scheme.AvailablePoints,
                 bank_account = BankAccount(ReadFields(customer))
             }
         });
@@ -754,6 +755,7 @@ public sealed class MobileAppController : ControllerBase
             {
                 LoyaltySchemeId = x.SchemeId,
                 SchemeName = x.SchemeName,
+                RedemptionEnabled = x.RedemptionEnabled,
                 AvailablePoints = x.AvailablePoints,
                 WalletType = wallet.WalletType
             })
@@ -773,13 +775,21 @@ public sealed class MobileAppController : ControllerBase
         var redemptions = await _dbContext.LoyaltyRedemptions.AsNoTracking()
             .Where(x => x.CustomerId == customerId && x.DeletedAt == null && (x.Status == LoyaltyRedemption.StatusPending || x.Status == LoyaltyRedemption.StatusApproved))
             .ToListAsync(cancellationToken);
+        var schemeIds = invoices.Where(x => x.SchemeId.HasValue).Select(x => x.SchemeId!.Value).Distinct().ToArray();
+        var redemptionSettings = await _dbContext.LoyaltySchemes.AsNoTracking()
+            .Where(x => schemeIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.RedemptionEnabled, cancellationToken);
 
         return new WalletPair(
-            BuildWallet("Regular", invoices, redemptions),
-            BuildWallet("Booster", invoices, redemptions));
+            BuildWallet("Regular", invoices, redemptions, redemptionSettings),
+            BuildWallet("Booster", invoices, redemptions, redemptionSettings));
     }
 
-    private static WalletDto BuildWallet(string walletType, IReadOnlyCollection<NewInvoiceDto> invoices, IReadOnlyCollection<LoyaltyRedemption> redemptions)
+    private static WalletDto BuildWallet(
+        string walletType,
+        IReadOnlyCollection<NewInvoiceDto> invoices,
+        IReadOnlyCollection<LoyaltyRedemption> redemptions,
+        IReadOnlyDictionary<ulong, bool> redemptionSettings)
     {
         var schemeRows = invoices
             .Where(x => x.ApprovalStatus == NewInvoice.StatusApprovedHo && x.SchemeId.HasValue && x.SchemePoints > 0)
@@ -789,7 +799,9 @@ public sealed class MobileAppController : ControllerBase
             {
                 var redeemed = redemptions.Where(r => r.LoyaltySchemeId == x.Key.SchemeId && string.Equals(r.WalletType, walletType, StringComparison.OrdinalIgnoreCase)).Sum(r => r.Points);
                 var earned = x.Sum(i => i.SchemePoints);
-                return new WalletSchemeDto(x.Key.SchemeId, x.Key.SchemeName ?? "Scheme", earned, redeemed, Math.Max(0, earned - redeemed));
+                var redemptionEnabled = x.Key.SchemeId.HasValue
+                    && redemptionSettings.GetValueOrDefault(x.Key.SchemeId.Value, false);
+                return new WalletSchemeDto(x.Key.SchemeId, x.Key.SchemeName ?? "Scheme", redemptionEnabled, earned, redeemed, Math.Max(0, earned - redeemed));
             })
             .ToList();
 
@@ -878,6 +890,7 @@ public sealed class MobileAppController : ControllerBase
             SchemeCode = scheme.SchemeCode,
             SchemeTag = scheme.SchemeTag,
             BasedOn = scheme.BasedOn,
+            RedemptionEnabled = scheme.RedemptionEnabled,
             Points = wallet.AvailablePoints,
             AvailablePoints = wallet.AvailablePoints,
             EarnedPoints = wallet.EarnedPoints,
@@ -938,6 +951,7 @@ public sealed class MobileAppController : ControllerBase
             SchemeCode = scheme?.SchemeCode,
             SchemeTag = scheme?.SchemeTag ?? "Booster",
             BasedOn = scheme?.BasedOn,
+            RedemptionEnabled = scheme?.RedemptionEnabled ?? false,
             Points = wallet.AvailablePoints,
             AvailablePoints = wallet.AvailablePoints,
             EarnedPoints = wallet.EarnedPoints,
@@ -1017,6 +1031,7 @@ public sealed class MobileAppController : ControllerBase
             StartDate = scheme.StartDate,
             EndDate = scheme.EndDate,
             BasedOn = scheme.BasedOn,
+            RedemptionEnabled = scheme.RedemptionEnabled,
             Status = scheme.Status,
             BrochurePath = scheme.BrochurePath,
             DaysLeft = Math.Max(0, (scheme.EndDate.ToDateTime(TimeOnly.MinValue).Date - DateTime.UtcNow.AddHours(5.5).Date).Days),
@@ -1746,7 +1761,7 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
 
     private sealed record WalletPair(WalletDto Regular, WalletDto Booster);
     private sealed record WalletDto(string WalletType, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints, IReadOnlyCollection<WalletSchemeDto> Schemes);
-    private sealed record WalletSchemeDto(ulong? SchemeId, string SchemeName, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints);
+    private sealed record WalletSchemeDto(ulong? SchemeId, string SchemeName, bool RedemptionEnabled, decimal EarnedPoints, decimal RedeemedPoints, decimal AvailablePoints);
 
     private sealed record MobileKycDetailDto(string Label, string Key, string? Value);
 
@@ -1768,6 +1783,7 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
     {
         public ulong? LoyaltySchemeId { get; set; }
         public string SchemeName { get; set; } = string.Empty;
+        public bool RedemptionEnabled { get; set; }
         public decimal AvailablePoints { get; set; }
         public string WalletType { get; set; } = string.Empty;
     }
@@ -1852,6 +1868,7 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
         public string? SchemeCode { get; set; }
         public string? SchemeTag { get; set; }
         public string? BasedOn { get; set; }
+        public bool RedemptionEnabled { get; set; }
         public decimal Points { get; set; }
         public decimal AvailablePoints { get; set; }
         public decimal EarnedPoints { get; set; }
@@ -1906,6 +1923,7 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
         public DateOnly StartDate { get; set; }
         public DateOnly EndDate { get; set; }
         public string BasedOn { get; set; } = string.Empty;
+        public bool RedemptionEnabled { get; set; }
         public string Status { get; set; } = string.Empty;
         public string? BrochurePath { get; set; }
         public int DaysLeft { get; set; }
