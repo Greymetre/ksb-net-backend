@@ -1,13 +1,13 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Globalization;
 using System.Security.Claims;
-using System.Net;
 using System.Net.Mail;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Application.DTOs.NewInvoices;
 using Application.Interfaces.Repositories;
 using Application.Interfaces.Services;
+using Api.Services;
 using Domain.Entities;
 using Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
@@ -29,16 +29,18 @@ public sealed class MobileAppController : ControllerBase
     private readonly INewInvoiceRepository _invoiceRepository;
     private readonly ITokenService _tokenService;
     private readonly IPasswordHasher _passwordHasher;
+    private readonly ISmtpEmailSender _emailSender;
     private readonly IWebHostEnvironment _environment;
     private readonly IConfiguration _configuration;
 
-    public MobileAppController(AppDbContext dbContext, IMasterDataService masterDataService, INewInvoiceRepository invoiceRepository, ITokenService tokenService, IPasswordHasher passwordHasher, IWebHostEnvironment environment, IConfiguration configuration)
+    public MobileAppController(AppDbContext dbContext, IMasterDataService masterDataService, INewInvoiceRepository invoiceRepository, ITokenService tokenService, IPasswordHasher passwordHasher, ISmtpEmailSender emailSender, IWebHostEnvironment environment, IConfiguration configuration)
     {
         _dbContext = dbContext;
         _masterDataService = masterDataService;
         _invoiceRepository = invoiceRepository;
         _tokenService = tokenService;
         _passwordHasher = passwordHasher;
+        _emailSender = emailSender;
         _environment = environment;
         _configuration = configuration;
     }
@@ -80,7 +82,7 @@ public sealed class MobileAppController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(customer.Password))
         {
-            await SendPasswordCodeAsync(customer, "Create your KSB Loyalty password", cancellationToken);
+            var setup = await SendPasswordCodeAsync(customer, "Create your KSB Loyalty password", cancellationToken);
             return Ok(new
             {
                 status = "success",
@@ -89,7 +91,11 @@ public sealed class MobileAppController : ControllerBase
                 mobile,
                 email = customer.Email,
                 masked_email = MaskEmail(customer.Email),
-                message = "A password setup code has been sent to your email."
+                mail_bypassed = setup.Bypassed,
+                testing_code = setup.Bypassed ? setup.Code : null,
+                message = setup.Bypassed
+                    ? "Email is unavailable on this testing server. Use the password setup link shown in the app."
+                    : "A password setup code has been sent to your email."
             });
         }
 
@@ -122,8 +128,18 @@ public sealed class MobileAppController : ControllerBase
         if (customer is null || string.IsNullOrWhiteSpace(customer.Email))
             return NotFound(new { status = "error", message = "No customer account with an email address was found for this mobile number." });
 
-        await SendPasswordCodeAsync(customer, "Reset your KSB Loyalty password", cancellationToken);
-        return Ok(new { status = "success", next_action = "set_password", masked_email = MaskEmail(customer.Email), message = "A password reset code has been sent to your email." });
+        var setup = await SendPasswordCodeAsync(customer, "Reset your KSB Loyalty password", cancellationToken);
+        return Ok(new
+        {
+            status = "success",
+            next_action = "set_password",
+            masked_email = MaskEmail(customer.Email),
+            mail_bypassed = setup.Bypassed,
+            testing_code = setup.Bypassed ? setup.Code : null,
+            message = setup.Bypassed
+                ? "Email is unavailable on this testing server. Use the password reset link shown in the app."
+                : "A password reset code has been sent to your email."
+        });
     }
 
     [AllowAnonymous]
@@ -629,7 +645,7 @@ public sealed class MobileAppController : ControllerBase
             x => x.Email != null && x.Email.ToLower() == email && (!exceptCustomerId.HasValue || x.Id != exceptCustomerId.Value),
             cancellationToken);
 
-    private async Task SendPasswordCodeAsync(Customer customer, string subject, CancellationToken cancellationToken)
+    private async Task<PasswordCodeDelivery> SendPasswordCodeAsync(Customer customer, string subject, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(customer.Email)) throw new InvalidOperationException("Customer email is required.");
 
@@ -638,53 +654,26 @@ public sealed class MobileAppController : ControllerBase
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        var host = MailSetting("Host", "MAIL_HOST") ?? throw new InvalidOperationException("SMTP host is not configured.");
-        var portText = MailSetting("Port", "MAIL_PORT");
-        var port = int.TryParse(portText, out var configuredPort) ? configuredPort : 587;
-        var username = MailSetting("Username", "MAIL_USERNAME");
-        var password = MailSetting("Password", "MAIL_PASSWORD");
-        var fromAddress = MailSetting("FromAddress", "MAIL_FROM_ADDRESS") ?? username
-            ?? throw new InvalidOperationException("SMTP from address is not configured.");
-        var fromName = MailSetting("FromName", "MAIL_FROM_NAME") ?? "KSB Loyalty";
-        var encryption = MailSetting("Encryption", "MAIL_ENCRYPTION");
-        var enableSsl = !string.Equals(encryption, "none", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(encryption, "false", StringComparison.OrdinalIgnoreCase)
-            && port != 25 && port != 1025;
-
-        using var message = new MailMessage
+        if (MailBypassEnabled())
         {
-            From = new MailAddress(fromAddress, fromName),
-            Subject = subject,
-            Body = $"Your KSB Loyalty password verification code is {code}. This code expires in 15 minutes.",
-            IsBodyHtml = false
-        };
-        message.To.Add(customer.Email);
-
-        using var client = new SmtpClient(host, port)
-        {
-            EnableSsl = enableSsl,
-            DeliveryMethod = SmtpDeliveryMethod.Network,
-            UseDefaultCredentials = string.IsNullOrWhiteSpace(username)
-        };
-        if (!string.IsNullOrWhiteSpace(username)) client.Credentials = new NetworkCredential(username, password);
-        // Bound SMTP latency independently from the HTTP server timeout. This
-        // prevents a bad SMTP host/port from leaving login requests open.
-        using var smtpTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        smtpTimeout.CancelAfter(TimeSpan.FromSeconds(300));
-        try
-        {
-            await client.SendMailAsync(message, smtpTimeout.Token);
+            return new PasswordCodeDelivery(code, true);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException("The SMTP server did not respond within 30 seconds.");
-        }
+
+        await _emailSender.SendAsync(customer.Email, subject, $"Your KSB Loyalty password verification code is {code}. This code expires in 15 minutes.", cancellationToken);
+        return new PasswordCodeDelivery(code, false);
     }
 
-    private string? MailSetting(string key, string environmentName) =>
-        Environment.GetEnvironmentVariable(environmentName)
-        ?? Environment.GetEnvironmentVariable($"Mail__{key}")
-        ?? _configuration[$"Mail:{key}"];
+    private bool MailBypassEnabled()
+    {
+        var value = Environment.GetEnvironmentVariable("MAIL_BYPASS_ENABLED")
+            ?? _configuration["Mail:BypassEnabled"]
+            ?? "true";
+        return value.Equals("true", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("1", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("yes", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private sealed record PasswordCodeDelivery(string Code, bool Bypassed);
 
     private static string? NormalizeEmail(string? email)
     {

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Api.Extensions;
 using Api.Middleware;
+using Api.Services;
 using Application.Extensions;
 using Infrastructure.Data;
 using Infrastructure.Extensions;
@@ -32,6 +33,7 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddLaravelCompatibleSwagger();
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration);
+builder.Services.AddSingleton<ISmtpEmailSender, SmtpEmailSender>();
 
 var jwt = builder.Configuration.GetSection("Jwt");
 var jwtKey = jwt["Key"] ?? throw new InvalidOperationException("Jwt:Key is not configured.");
