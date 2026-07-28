@@ -24,7 +24,7 @@ public sealed class CustomerService : ICustomerService
 
     private static readonly string[] RetailerExportColumns =
     [
-        "id", "customer_type", "name", "mobile", "contact_number", "active",
+        "id", "customer_type", "name", "mobile", "email", "contact_number", "active",
         "owner_name", "shop_name", "mobile_numbers", "distributor_name", "agri_distributor", "employee_id", "beat_id", "whatsapp_number",
         "address_line", "country_id", "state_id", "district_id", "city_id", "pincode_id",
         "belt_area_market_name", "gst_number", "gst_attachment", "pan_number", "pan_attachment", "aadhar_no", "aadhar_attachment",

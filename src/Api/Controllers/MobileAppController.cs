@@ -1,6 +1,8 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Globalization;
 using System.Security.Claims;
+using System.Net;
+using System.Net.Mail;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Application.DTOs.NewInvoices;
@@ -26,81 +28,120 @@ public sealed class MobileAppController : ControllerBase
     private readonly IMasterDataService _masterDataService;
     private readonly INewInvoiceRepository _invoiceRepository;
     private readonly ITokenService _tokenService;
+    private readonly IPasswordHasher _passwordHasher;
     private readonly IWebHostEnvironment _environment;
+    private readonly IConfiguration _configuration;
 
-    public MobileAppController(AppDbContext dbContext, IMasterDataService masterDataService, INewInvoiceRepository invoiceRepository, ITokenService tokenService, IWebHostEnvironment environment)
+    public MobileAppController(AppDbContext dbContext, IMasterDataService masterDataService, INewInvoiceRepository invoiceRepository, ITokenService tokenService, IPasswordHasher passwordHasher, IWebHostEnvironment environment, IConfiguration configuration)
     {
         _dbContext = dbContext;
         _masterDataService = masterDataService;
         _invoiceRepository = invoiceRepository;
         _tokenService = tokenService;
+        _passwordHasher = passwordHasher;
         _environment = environment;
+        _configuration = configuration;
     }
 
     [AllowAnonymous]
-    [HttpPost("auth/send-otp")]
-    public async Task<IActionResult> SendOtp([FromBody] SendOtpRequest request, CancellationToken cancellationToken)
+    [HttpPost("auth/customer-lookup")]
+    public async Task<IActionResult> CustomerLookup([FromBody] CustomerLookupRequest request, CancellationToken cancellationToken)
     {
         var mobile = NormalizeMobile(request.Mobile);
-        if (string.IsNullOrWhiteSpace(mobile)) return BadRequest(new { status = "error", message = "Mobile number is required." });
+        if (string.IsNullOrWhiteSpace(mobile)) return BadRequest(new { status = "error", message = "A valid mobile number is required." });
 
-        var otp = Random.Shared.Next(1000, 9999).ToString();
         var customer = await FindMobileCustomer(mobile).FirstOrDefaultAsync(cancellationToken);
-        if (customer is not null)
+        if (customer is null)
         {
-            customer.Otp = otp;
+            if (string.IsNullOrWhiteSpace(request.Email))
+                return Ok(new { status = "success", next_action = "email_required", customer_exists = false, mobile });
+
+            var email = NormalizeEmail(request.Email);
+            if (email is null) return BadRequest(new { status = "error", message = "A valid email address is required." });
+            if (await EmailInUseAsync(email, null, cancellationToken))
+                return Conflict(new { status = "error", message = "This email address is already registered with another customer." });
+
+            return Ok(new { status = "success", next_action = "register", customer_exists = false, mobile, email });
+        }
+
+        if (string.IsNullOrWhiteSpace(customer.Email))
+        {
+            if (string.IsNullOrWhiteSpace(request.Email))
+                return Ok(new { status = "success", next_action = "email_required", customer_exists = true, mobile });
+
+            var email = NormalizeEmail(request.Email);
+            if (email is null) return BadRequest(new { status = "error", message = "A valid email address is required." });
+            if (await EmailInUseAsync(email, customer.Id, cancellationToken))
+                return Conflict(new { status = "error", message = "This email address is already registered with another customer." });
+            customer.Email = email;
             customer.UpdatedAt = DateTime.UtcNow;
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        return Ok(new
+        if (string.IsNullOrWhiteSpace(customer.Password))
         {
-            status = "success",
-            message = "OTP sent successfully.",
-            request_id = $"{Guid.NewGuid():N}:{otp}",
-            otp,
-            testing_otp = otp,
-            is_registered = customer is not null
-        });
+            await SendPasswordCodeAsync(customer, "Create your KSB Loyalty password", cancellationToken);
+            return Ok(new
+            {
+                status = "success",
+                next_action = "set_password",
+                customer_exists = true,
+                mobile,
+                email = customer.Email,
+                masked_email = MaskEmail(customer.Email),
+                message = "A password setup code has been sent to your email."
+            });
+        }
+
+        return Ok(new { status = "success", next_action = "password", customer_exists = true, mobile, email = customer.Email, masked_email = MaskEmail(customer.Email) });
     }
 
     [AllowAnonymous]
-    [HttpPost("auth/verify-otp")]
-    public async Task<IActionResult> VerifyOtp([FromBody] VerifyOtpRequest request, CancellationToken cancellationToken)
+    [HttpPost("auth/customer-login")]
+    public async Task<IActionResult> CustomerPasswordLogin([FromBody] CustomerPasswordLoginRequest request, CancellationToken cancellationToken)
     {
         var mobile = NormalizeMobile(request.Mobile);
-        if (string.IsNullOrWhiteSpace(mobile) || string.IsNullOrWhiteSpace(request.Otp))
-        {
-            return BadRequest(new { status = "error", message = "Mobile number and OTP are required." });
-        }
-
-        var requestOtp = request.RequestId?.Split(':').LastOrDefault();
         var customer = await FindMobileCustomer(mobile).FirstOrDefaultAsync(cancellationToken);
-        var valid = string.Equals(customer?.Otp, request.Otp, StringComparison.Ordinal)
-            || string.Equals(requestOtp, request.Otp, StringComparison.Ordinal)
-            || request.Otp == "1234";
-        if (!valid) return Unauthorized(new { status = "error", message = "Invalid OTP." });
-
-        if (customer is null)
-        {
-            return Ok(new { status = "success", message = "OTP verified.", is_registered = false, mobile });
-        }
+        if (customer is null || string.IsNullOrWhiteSpace(customer.Password) || string.IsNullOrWhiteSpace(request.Password)
+            || !_passwordHasher.Verify(request.Password, customer.Password))
+            return Unauthorized(new { status = "error", message = "Incorrect mobile number or password." });
+        if (!string.Equals(customer.Active, "Y", StringComparison.OrdinalIgnoreCase))
+            return StatusCode(StatusCodes.Status403Forbidden, new { status = "error", message = "Account deactivated. Contact admin." });
 
         var token = _tokenService.CreateAccessToken("customers", customer.Id, DisplayName(customer), [], out var tokenId);
         await StoreCustomerTokenAndLogin(customer.Id, tokenId, request, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(new { status = "success", message = "Login successful.", token, access_token = token, user = ToProfile(customer) });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("auth/forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] PasswordCodeRequest request, CancellationToken cancellationToken)
+    {
+        var customer = await FindMobileCustomer(NormalizeMobile(request.Mobile)).FirstOrDefaultAsync(cancellationToken);
+        if (customer is null || string.IsNullOrWhiteSpace(customer.Email))
+            return NotFound(new { status = "error", message = "No customer account with an email address was found for this mobile number." });
+
+        await SendPasswordCodeAsync(customer, "Reset your KSB Loyalty password", cancellationToken);
+        return Ok(new { status = "success", next_action = "set_password", masked_email = MaskEmail(customer.Email), message = "A password reset code has been sent to your email." });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("auth/set-password")]
+    public async Task<IActionResult> SetPassword([FromBody] SetPasswordRequest request, CancellationToken cancellationToken)
+    {
+        var customer = await FindMobileCustomer(NormalizeMobile(request.Mobile)).FirstOrDefaultAsync(cancellationToken);
+        if (customer is null) return NotFound(new { status = "error", message = "Customer not found." });
+        if (string.IsNullOrWhiteSpace(request.Code) || customer.Otp != request.Code || customer.UpdatedAt < DateTime.UtcNow.AddMinutes(-15))
+            return BadRequest(new { status = "error", message = "The password code is invalid or has expired." });
+        if (string.IsNullOrWhiteSpace(request.Password) || request.Password.Length < 6)
+            return BadRequest(new { status = "error", message = "Password must be at least 6 characters." });
+
+        customer.Password = _passwordHasher.Hash(request.Password);
         customer.Otp = null;
         customer.UpdatedAt = DateTime.UtcNow;
         await _dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(new
-        {
-            status = "success",
-            message = "OTP verified.",
-            is_registered = true,
-            token,
-            access_token = token,
-            user = ToProfile(customer)
-        });
+        return Ok(new { status = "success", next_action = "password", message = "Password created successfully. You can now log in." });
     }
 
     [AllowAnonymous]
@@ -110,13 +151,16 @@ public sealed class MobileAppController : ControllerBase
         var mobile = NormalizeMobile(request.Mobile ?? GetString(request.Extra, "mobile_number"));
         var ownerName = FirstNonEmpty(request.OwnerName, request.Name, GetString(request.Extra, "owner_name"), GetString(request.Extra, "full_name"));
         var shopName = FirstNonEmpty(request.ShopName, request.FirmName, GetString(request.Extra, "shop_name"), ownerName);
-        if (string.IsNullOrWhiteSpace(mobile) || string.IsNullOrWhiteSpace(ownerName))
+        var email = NormalizeEmail(request.Email);
+        if (string.IsNullOrWhiteSpace(mobile) || string.IsNullOrWhiteSpace(ownerName) || email is null || string.IsNullOrWhiteSpace(request.Password))
         {
-            return BadRequest(new { status = "error", message = "Owner name and mobile number are required." });
+            return BadRequest(new { status = "error", message = "Owner name, mobile number, email, and password are required." });
         }
+        if (request.Password.Length < 6) return BadRequest(new { status = "error", message = "Password must be at least 6 characters." });
 
         var existing = await FindMobileCustomer(mobile).FirstOrDefaultAsync(cancellationToken);
         if (existing is not null) return Conflict(new { status = "error", message = "Mobile number is already registered.", user = ToProfile(existing) });
+        if (await EmailInUseAsync(email, null, cancellationToken)) return Conflict(new { status = "error", message = "Email address is already registered." });
 
         var customerType = ResolveCustomerType(request.AppType, request.CustomerType, GetString(request.Extra, "customer_type"));
         var fields = ToFieldDictionary(request.Extra);
@@ -138,7 +182,8 @@ public sealed class MobileAppController : ControllerBase
             FirstName = ownerName,
             Mobile = mobile,
             ContactNumber = mobile,
-            Email = request.Email?.Trim().ToLowerInvariant(),
+            Email = email,
+            Password = _passwordHasher.Hash(request.Password),
             CustomerType = customerType,
             CustomerCode = $"{CustomerTypePrefix(customerType)}-{now:yyMMddHHmmss}",
             ExecutiveId = assignedUserId > 0 ? assignedUserId : null,
@@ -578,6 +623,81 @@ public sealed class MobileAppController : ControllerBase
 
     private IQueryable<Customer> FindMobileCustomer(string mobile) =>
         _dbContext.Customers.Where(x => x.Active == "Y" && (x.CustomerType == DealerType || x.CustomerType == RetailerType || x.CustomerType == InfluencerType) && (x.Mobile == mobile || x.ContactNumber == mobile || (x.CustomFields != null && x.CustomFields.Contains(mobile))));
+
+    private Task<bool> EmailInUseAsync(string email, ulong? exceptCustomerId, CancellationToken cancellationToken) =>
+        _dbContext.Customers.IgnoreQueryFilters().AnyAsync(
+            x => x.Email != null && x.Email.ToLower() == email && (!exceptCustomerId.HasValue || x.Id != exceptCustomerId.Value),
+            cancellationToken);
+
+    private async Task SendPasswordCodeAsync(Customer customer, string subject, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(customer.Email)) throw new InvalidOperationException("Customer email is required.");
+
+        var code = Random.Shared.Next(100000, 999999).ToString(CultureInfo.InvariantCulture);
+        customer.Otp = code;
+        customer.UpdatedAt = DateTime.UtcNow;
+        await _dbContext.SaveChangesAsync(cancellationToken);
+
+        var host = MailSetting("Host", "MAIL_HOST") ?? throw new InvalidOperationException("SMTP host is not configured.");
+        var portText = MailSetting("Port", "MAIL_PORT");
+        var port = int.TryParse(portText, out var configuredPort) ? configuredPort : 587;
+        var username = MailSetting("Username", "MAIL_USERNAME");
+        var password = MailSetting("Password", "MAIL_PASSWORD");
+        var fromAddress = MailSetting("FromAddress", "MAIL_FROM_ADDRESS") ?? username
+            ?? throw new InvalidOperationException("SMTP from address is not configured.");
+        var fromName = MailSetting("FromName", "MAIL_FROM_NAME") ?? "KSB Loyalty";
+        var encryption = MailSetting("Encryption", "MAIL_ENCRYPTION");
+        var enableSsl = !string.Equals(encryption, "none", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(encryption, "false", StringComparison.OrdinalIgnoreCase)
+            && port != 25 && port != 1025;
+
+        using var message = new MailMessage
+        {
+            From = new MailAddress(fromAddress, fromName),
+            Subject = subject,
+            Body = $"Your KSB Loyalty password verification code is {code}. This code expires in 15 minutes.",
+            IsBodyHtml = false
+        };
+        message.To.Add(customer.Email);
+
+        using var client = new SmtpClient(host, port)
+        {
+            EnableSsl = enableSsl,
+            DeliveryMethod = SmtpDeliveryMethod.Network,
+            UseDefaultCredentials = string.IsNullOrWhiteSpace(username)
+        };
+        if (!string.IsNullOrWhiteSpace(username)) client.Credentials = new NetworkCredential(username, password);
+        await client.SendMailAsync(message, cancellationToken);
+    }
+
+    private string? MailSetting(string key, string environmentName) =>
+        Environment.GetEnvironmentVariable(environmentName)
+        ?? Environment.GetEnvironmentVariable($"Mail__{key}")
+        ?? _configuration[$"Mail:{key}"];
+
+    private static string? NormalizeEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return null;
+        var normalized = email.Trim().ToLowerInvariant();
+        try
+        {
+            var parsed = new MailAddress(normalized);
+            return parsed.Address == normalized ? normalized : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string MaskEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email)) return string.Empty;
+        var parts = email.Split('@', 2);
+        if (parts.Length != 2) return email;
+        var visible = parts[0].Length <= 2 ? parts[0][..1] : parts[0][..2];
+        return $"{visible}{new string('*', Math.Max(3, parts[0].Length - visible.Length))}@{parts[1]}";
+    }
 
     private async Task<Customer?> CurrentCustomer(CancellationToken cancellationToken)
     {
@@ -1689,19 +1809,28 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
         public string? UniqueId { get; set; }
     }
 
-    public sealed class SendOtpRequest : DeviceRequest
+    public sealed class CustomerLookupRequest
     {
         public string? Mobile { get; set; }
-        public string? CountryCode { get; set; }
-        public string? AppType { get; set; }
+        public string? Email { get; set; }
     }
 
-    public sealed class VerifyOtpRequest : DeviceRequest
+    public sealed class CustomerPasswordLoginRequest : DeviceRequest
     {
         public string? Mobile { get; set; }
-        public string? CountryCode { get; set; }
-        public string? Otp { get; set; }
-        public string? RequestId { get; set; }
+        public string? Password { get; set; }
+    }
+
+    public sealed class PasswordCodeRequest
+    {
+        public string? Mobile { get; set; }
+    }
+
+    public sealed class SetPasswordRequest
+    {
+        public string? Mobile { get; set; }
+        public string? Code { get; set; }
+        public string? Password { get; set; }
     }
 
     public sealed class RegisterRequest : DeviceRequest
@@ -1714,6 +1843,7 @@ VALUES ('Y', {0}, {1}, {2}, {3}, {4}, {5}, {6}, UTC_TIMESTAMP(), UTC_TIMESTAMP()
         public string? FirmName { get; set; }
         public string? Mobile { get; set; }
         public string? Email { get; set; }
+        public string? Password { get; set; }
         public string? Address { get; set; }
         public ulong? StateId { get; set; }
         public ulong? CityId { get; set; }
