@@ -670,7 +670,7 @@ public sealed class MobileAppController : ControllerBase
         // Bound SMTP latency independently from the HTTP server timeout. This
         // prevents a bad SMTP host/port from leaving login requests open.
         using var smtpTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        smtpTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+        smtpTimeout.CancelAfter(TimeSpan.FromSeconds(300));
         try
         {
             await client.SendMailAsync(message, smtpTimeout.Token);
