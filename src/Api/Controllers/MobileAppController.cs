@@ -667,7 +667,18 @@ public sealed class MobileAppController : ControllerBase
             UseDefaultCredentials = string.IsNullOrWhiteSpace(username)
         };
         if (!string.IsNullOrWhiteSpace(username)) client.Credentials = new NetworkCredential(username, password);
-        await client.SendMailAsync(message, cancellationToken);
+        // Bound SMTP latency independently from the HTTP server timeout. This
+        // prevents a bad SMTP host/port from leaving login requests open.
+        using var smtpTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        smtpTimeout.CancelAfter(TimeSpan.FromSeconds(30));
+        try
+        {
+            await client.SendMailAsync(message, smtpTimeout.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException("The SMTP server did not respond within 30 seconds.");
+        }
     }
 
     private string? MailSetting(string key, string environmentName) =>
